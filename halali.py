@@ -130,16 +130,12 @@ class Card(arcade.Sprite):
         self.facing = "down"
         self.directional = False
 
-        # Image to use for the sprite when face up
+        # Image to use for the sprite when face down
         self.image_file_name = ":resources:images/tiles/boxCrate.png"
-        # background: topdown_tanks/tileGrass1.png
 
-        # Call the parent
         super().__init__(
             self.image_file_name,
-            scale=0.7,  # TODO
-            # image_width=CARD_WIDTH,
-            # image_height=CARD_HEIGHT,
+            scale=0.7,
             hit_box_algorithm="None",
         )
         if kind.endswith(("_n", "_w", "_s", "_e")):
@@ -184,9 +180,9 @@ class Card(arcade.Sprite):
         return other_card.kind in CARD_TYPES[self.kind].get("eats", [])
 
 
-class Halali(arcade.Window):
+class GameView(arcade.View):
     def __init__(self):
-        super().__init__(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE)
+        super().__init__()
 
         self.place_list = None
         self.card_list = None
@@ -212,7 +208,7 @@ class Halali(arcade.Window):
         self.points = {team: 0 for team in TEAMS}
         self.turns_left = None
 
-        self.tiles_left = 3  # FIXME: N_ROWS * N_COLS - 1
+        self.tiles_left = N_ROWS * N_COLS - 1
         self.place_list = arcade.SpriteList()
         for x in range(N_COLS):
             for y in range(N_ROWS):
@@ -307,8 +303,9 @@ class Halali(arcade.Window):
     def swap_teams(self):
         if self.turns_left is not None:
             if self.turns_left <= 0:
-                print("End of game!")
-                raise
+                game_over_view = GameOverView(self.points)
+                game_over_view.setup()
+                self.window.show_view(game_over_view)
             self.turns_left -= 0.5
         elif self.tiles_left == 0:
             self.add_exits()
@@ -357,7 +354,6 @@ class Halali(arcade.Window):
         self.animal_score.text = str(self.points["animals"])
         self.animal_score.draw()
 
-        # TODO: only if turns_left
         if self.turns_left is not None:
             arcade.draw_rectangle_filled(
                 SCREEN_WIDTH // 2,
@@ -393,7 +389,10 @@ class Halali(arcade.Window):
         if self.held_card:
             place, distance = arcade.get_closest_sprite(self.held_card, self.place_list)
             try:
-                if place.is_exit and CARD_TYPES[self.held_card.kind].get("team") != self.to_play:
+                if (
+                    place.is_exit
+                    and CARD_TYPES[self.held_card.kind].get("team") != self.to_play
+                ):
                     raise ResetPosition("Can't rescue neutral pieces")
                 if not arcade.check_for_collision(self.held_card, place):
                     # Not on a place
@@ -451,7 +450,9 @@ class Halali(arcade.Window):
                     self.points[self.to_play] += CARD_TYPES[other_card.kind]["points"]
                     other_card.kill()
                 if place.is_exit:
-                    self.points[self.to_play] += CARD_TYPES[self.held_card.kind]["points"]
+                    self.points[self.to_play] += (
+                        CARD_TYPES[self.held_card.kind]["points"]
+                    )
                     self.held_card.kill()
                 else:
                     self.held_card.position = place.center_x, place.center_y
@@ -460,7 +461,61 @@ class Halali(arcade.Window):
                 self.held_card = self.held_card_original_position = None
 
 
+class GameOverView(arcade.View):
+    def __init__(self, points):
+        """ This is run once when we switch to this view """
+        super().__init__()
+        self.points = points
+        self.texture = arcade.load_texture("main.png")
+        self.winner = (
+            "Animals"
+            if self.points["animals"] > self.points["humans"]
+            else "Humans"
+        )
+
+    def setup(self):
+        self.heading = arcade.Text(
+            "Game over",
+            start_x=SCREEN_WIDTH // 2,
+            start_y=SCREEN_HEIGHT - TEXT_MARGIN,
+            anchor_x="center",
+            anchor_y="center",
+            font_size=48,
+            color=(220, 220, 220),
+        )
+        self.result = arcade.Text(
+            f"{self.winner} won! ({self.points['humans']}:{self.points['animals']})",
+            start_x=SCREEN_WIDTH // 2,
+            start_y=TEXT_MARGIN,
+            anchor_x="center",
+            anchor_y="center",
+            font_size=32,
+            color=(220, 220, 220),
+        )
+
+    def on_draw(self):
+        """ Draw this view """
+        self.clear()
+        self.texture.draw_sized(
+            SCREEN_WIDTH / 2,
+            SCREEN_HEIGHT / 2,
+            SCREEN_WIDTH,
+            SCREEN_HEIGHT * 0.75,
+        )
+        self.heading.draw()
+        self.result.draw()
+
+    def on_mouse_press(self, _x, _y, _button, _modifiers):
+        """ If the user presses the mouse button, re-start the game. """
+        game_view = GameView()
+        game_view.setup()
+        self.window.show_view(game_view)
+
+
+
 if __name__ == "__main__":
-    window = Halali()
-    window.setup()
+    window = arcade.Window(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE)
+    start_view = GameView()
+    window.show_view(start_view)
+    start_view.setup()
     arcade.run()
