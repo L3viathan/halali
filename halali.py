@@ -61,7 +61,8 @@ CARD_TYPES = {
     "hunter": {
         "count": 8,
         "team": "humans",
-        "variants": ["n", "w", "s", "e"],
+        "variants": ["up", "down", "left", "right"],
+        "directional": True,
         "eats": ["duck", "pheasant", "fox", "bear"],
         "points": 5,
     },
@@ -124,58 +125,49 @@ def can_see(point_1, point_2, allow_list, walls, max_distance=-1, check_resoluti
 
 
 class Card(arcade.Sprite):
-    def __init__(self, kind):
+    def __init__(self, orig_kind):
         """ Card constructor """
 
         self.facing = "down"
-        self.directional = False
+        self.direction = None
 
         # Image to use for the sprite when face down
-        self.image_file_name = ":resources:images/tiles/boxCrate.png"
+        self.image_file_name = "resources/hidden.png"
 
         super().__init__(
             self.image_file_name,
-            scale=0.7,
+            scale=1,
             hit_box_algorithm="None",
         )
-        if kind.endswith(("_n", "_w", "_s", "_e")):
-            kind, _, direction = kind.rpartition("_")
-            self.angle = {
-                "e": 0,
-                "s": 90,
-                "w": 180,
-                "n": 270,
-            }[direction]
-            self.directional = True
-        self.append_texture(arcade.load_texture(f"{kind}.png"))
-        if "_" in kind:
-            # drop texture variation in kinds
-            kind, *_ = kind.rpartition("_")
+        # drop texture variation in kinds
+        kind, _, variant = orig_kind.partition("_")
+        if CARD_TYPES[kind].get("directional"):
+            self.direction = variant
+        self.append_texture(arcade.load_texture(f"resources/{orig_kind}.png"))
         self.kind = kind
 
     def turn_over(self):
         self.facing = "up"
         self.set_texture(1)
-        self.scale = 0.5
 
     def can_kill(self, other_card, original_position):
         center_x, center_y = original_position
-        if self.directional:
-            if self.angle == 0:
+        if self.direction is not None:
+            if self.direction == "right":
                 if center_x >= other_card.center_x:
-                    raise ResetPosition(f"Hunter 0 {center_x} {other_card.center_x}")
+                    raise ResetPosition(f"Hunter can only kill in the {self.direction} direction.")
                     return False
-            elif self.angle == 90:
-                if center_y >= other_card.center_y:
-                    raise ResetPosition(f"Hunter 90 {center_x} {other_card.center_x}")
-                    return False
-            elif self.angle == 180:
-                if center_x <= other_card.center_x:
-                    raise ResetPosition(f"Hunter 180 {center_x} {other_card.center_x}")
-                    return False
-            elif self.angle == 270:
+            elif self.direction == "down":
                 if center_y <= other_card.center_y:
-                    raise ResetPosition(f"Hunter 270 {center_x} {other_card.center_x}")
+                    raise ResetPosition(f"Hunter can only kill in the {self.direction} direction.")
+                    return False
+            elif self.direction == "left":
+                if center_x <= other_card.center_x:
+                    raise ResetPosition(f"Hunter can only kill in the {self.direction} direction.")
+                    return False
+            elif self.direction == "up":
+                if center_y >= other_card.center_y:
+                    raise ResetPosition(f"Hunter can only kill in the {self.direction} direction.")
                     return False
         return other_card.kind in CARD_TYPES[self.kind].get("eats", [])
 
@@ -208,7 +200,7 @@ class GameView(arcade.View):
         self.points = {team: 0 for team in TEAMS}
         self.turns_left = None
 
-        self.tiles_left = N_ROWS * N_COLS - 1
+        self.tiles_left = 2  # FIXME: N_ROWS * N_COLS - 1
         self.place_list = arcade.SpriteList()
         for x in range(N_COLS):
             for y in range(N_ROWS):
@@ -291,11 +283,18 @@ class GameView(arcade.View):
                 SCREEN_MARGIN + CARD_HEIGHT / 2 + (N_COLS // 2) * CARD_HEIGHT,
             ),
         ]:
-            exit = arcade.SpriteSolidColor(
-                CARD_WIDTH - 20,
-                CARD_HEIGHT - 20,
-                (102, 255, 0),
+            exit = arcade.Sprite(
+                "resources/center.png",
+                # CARD_WIDTH,
+                # CARD_HEIGHT,
+                # CARD_WIDTH - 20,
+                # CARD_HEIGHT - 20,
             )
+            # exit = arcade.SpriteSolidColor(
+            #     CARD_WIDTH - 20,
+            #     CARD_HEIGHT - 20,
+            #     (102, 255, 0),
+            # )
             exit.is_exit = True
             exit.position = pos
             self.place_list.append(exit)
@@ -309,7 +308,7 @@ class GameView(arcade.View):
             self.turns_left -= 0.5
         elif self.tiles_left == 0:
             self.add_exits()
-            self.turns_left = 5
+            self.turns_left = 2 # 5
         self.to_play = "animals" if self.to_play == "humans" else "humans"
 
     def pull_to_top(self, card):
@@ -355,14 +354,21 @@ class GameView(arcade.View):
         self.animal_score.draw()
 
         if self.turns_left is not None:
+            x_pos = SCREEN_WIDTH // 8 * (1 if self.to_play == "animals" else 7)
             arcade.draw_rectangle_filled(
-                SCREEN_WIDTH // 2,
+                x_pos,
                 SCREEN_HEIGHT + TEXT_MARGIN // 2,
                 SCREEN_WIDTH // 2,
                 TEXT_MARGIN * 4,
                 color=self.accent_color,
             )
-            self.turn_counter.text = f"{self.turns_left} turns left"
+            self.turn_counter.text = f"{round(self.turns_left + 0.1)} turns left"
+            if self.to_play == "animals":
+                self.turn_counter.x = TEXT_MARGIN
+                self.turn_counter.anchor_x = "left"
+            elif self.to_play == "humans":
+                self.turn_counter.x = SCREEN_WIDTH - TEXT_MARGIN
+                self.turn_counter.anchor_x = "right"
             self.turn_counter.draw()
 
     def on_mouse_press(self, x, y, button, key_modifiers):
@@ -466,7 +472,7 @@ class GameOverView(arcade.View):
         """ This is run once when we switch to this view """
         super().__init__()
         self.points = points
-        self.texture = arcade.load_texture("main.png")
+        self.texture = arcade.load_texture("resources/gameover.png")
         self.winner = (
             "Animals"
             if self.points["animals"] > self.points["humans"]
@@ -474,6 +480,7 @@ class GameOverView(arcade.View):
         )
 
     def setup(self):
+        arcade.set_background_color(arcade.color.BLACK)
         self.heading = arcade.Text(
             "Game over",
             start_x=SCREEN_WIDTH // 2,
