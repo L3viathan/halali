@@ -200,7 +200,7 @@ class GameView(arcade.View):
         self.points = {team: 0 for team in TEAMS}
         self.turns_left = None
 
-        self.tiles_left = 2  # FIXME: N_ROWS * N_COLS - 1
+        self.tiles_left = N_ROWS * N_COLS - 1
         self.place_list = arcade.SpriteList()
         for x in range(N_COLS):
             for y in range(N_ROWS):
@@ -308,7 +308,7 @@ class GameView(arcade.View):
             self.turns_left -= 0.5
         elif self.tiles_left == 0:
             self.add_exits()
-            self.turns_left = 2 # 5
+            self.turns_left = 5
         self.to_play = "animals" if self.to_play == "humans" else "humans"
 
     def pull_to_top(self, card):
