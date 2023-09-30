@@ -1,5 +1,7 @@
 import random
+import os
 import arcade
+from pyglet.math import Vec2
 
 SCREEN_MARGIN = 100
 
@@ -96,6 +98,18 @@ class ResetPosition(Exception):
     pass
 
 
+def path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+
+
 def generate_pile():
     result = []
     for kind, data in CARD_TYPES.items():
@@ -132,7 +146,7 @@ class Card(arcade.Sprite):
         self.direction = None
 
         # Image to use for the sprite when face down
-        self.image_file_name = "resources/hidden.png"
+        self.image_file_name = path("resources/hidden.png")
 
         super().__init__(
             self.image_file_name,
@@ -143,8 +157,24 @@ class Card(arcade.Sprite):
         kind, _, variant = orig_kind.partition("_")
         if CARD_TYPES[kind].get("directional"):
             self.direction = variant
-        self.append_texture(arcade.load_texture(f"resources/{orig_kind}.png"))
+        self.append_texture(arcade.load_texture(path(f"resources/{orig_kind}.png")))
         self.kind = kind
+        self.being_held = False
+        self.orig_position = None
+
+    @property
+    def game_position(self):
+        if self.being_held:
+            return self.orig_position
+        return self.position
+
+    def hold(self):
+        self.orig_position = self.position
+        self.being_held = True
+
+    def release(self):
+        self.being_held = False
+        self.orig_position = None
 
     def turn_over(self):
         self.facing = "up"
@@ -179,7 +209,6 @@ class GameView(arcade.View):
         self.place_list = None
         self.card_list = None
         self.held_card = None
-        self.held_card_original_position = None
         self.to_play = None
         self.points = None
         self.animal_score = None
@@ -187,6 +216,8 @@ class GameView(arcade.View):
         self.turn_counter = None
         self.tiled_revealed = None
         self.turns_left = None
+        self.camera_game = arcade.Camera(SCREEN_WIDTH, SCREEN_HEIGHT)
+        self.camera_hud = arcade.Camera(SCREEN_WIDTH, SCREEN_HEIGHT)
 
     @property
     def accent_color(self):
@@ -232,7 +263,6 @@ class GameView(arcade.View):
                 self.card_list.append(card)
 
         self.held_card = None
-        self.held_card_original_position = None
 
         self.animal_score = arcade.Text(
             "0",
@@ -284,7 +314,7 @@ class GameView(arcade.View):
             ),
         ]:
             exit = arcade.Sprite(
-                "resources/center.png",
+                path("resources/center.png"),
                 # CARD_WIDTH,
                 # CARD_HEIGHT,
                 # CARD_WIDTH - 20,
@@ -319,8 +349,10 @@ class GameView(arcade.View):
         """ Render the screen. """
         # Clear the screen
         self.clear()
+        self.camera_game.use()
         self.place_list.draw()
         self.card_list.draw()
+        self.camera_hud.use()
         self.draw_hud()
 
     def draw_hud(self):
@@ -383,7 +415,7 @@ class GameView(arcade.View):
             if card.kind not in MOVABLE_FOR[self.to_play]:
                 return
             self.held_card = cards[-1]
-            self.held_card_original_position = self.held_card.position
+            self.held_card.hold()
             self.pull_to_top(self.held_card)
 
     def on_mouse_motion(self, x, y, dx, dy):
@@ -404,7 +436,7 @@ class GameView(arcade.View):
                     # Not on a place
                     raise ResetPosition("Not intersecting with a place")
 
-                if self.held_card_original_position == place.position:
+                if self.held_card.game_position == place.position:
                     raise ResetPosition("Already at this place")
 
                 # find other card at that place
@@ -420,13 +452,13 @@ class GameView(arcade.View):
                 # Let's look for reasons we can't accept the input.
                 # Are we not going straight?
                 if not (
-                    (self.held_card_original_position[0] == place.center_x)
-                    or (self.held_card_original_position[1] == place.center_y)
+                    (self.held_card.game_position[0] == place.center_x)
+                    or (self.held_card.game_position[1] == place.center_y)
                 ):
                     raise ResetPosition("Can't go diagonally")
 
                 if CARD_TYPES[self.held_card.kind].get("slow") and arcade.get_distance(
-                    *self.held_card_original_position,
+                    *self.held_card.game_position,
                     place.center_x,
                     place.center_y,
                 ) > CARD_WIDTH:
@@ -434,7 +466,7 @@ class GameView(arcade.View):
 
                 # Do we not have a clear path (other than ourselves and targets)?
                 if not can_see(
-                    self.held_card_original_position,
+                    self.held_card.game_position,
                     place.position,
                     allowed,
                     self.card_list,
@@ -444,13 +476,14 @@ class GameView(arcade.View):
                 # Is the other card not edible?
                 if other_card and not self.held_card.can_kill(
                     other_card,
-                    self.held_card_original_position,
+                    self.held_card.game_position,
                 ):
                     raise ResetPosition(f"Can't eat {other_card.kind}")
 
             except ResetPosition as e:
                 print(e.args[0])
-                self.held_card.position = self.held_card_original_position
+                self.camera_game.shake(Vec2(10, 0), speed=5)
+                self.held_card.position = self.held_card.game_position
             else:
                 if other_card:
                     self.points[self.to_play] += CARD_TYPES[other_card.kind]["points"]
@@ -464,7 +497,8 @@ class GameView(arcade.View):
                     self.held_card.position = place.center_x, place.center_y
                 self.swap_teams()
             finally:
-                self.held_card = self.held_card_original_position = None
+                self.held_card.release()
+                self.held_card = None
 
 
 class GameOverView(arcade.View):
@@ -472,7 +506,7 @@ class GameOverView(arcade.View):
         """ This is run once when we switch to this view """
         super().__init__()
         self.points = points
-        self.texture = arcade.load_texture("resources/gameover.png")
+        self.texture = arcade.load_texture(path("resources/gameover.png"))
         self.winner = (
             "Animals"
             if self.points["animals"] > self.points["humans"]
