@@ -98,6 +98,10 @@ class ResetPosition(Exception):
     pass
 
 
+class GameOver(Exception):
+    pass
+
+
 def path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
@@ -107,6 +111,21 @@ def path(relative_path):
         base_path = os.path.abspath(".")
 
     return os.path.join(base_path, relative_path)
+
+
+def location_from_position(position):
+    x, y = position
+    return (
+        int((x - SCREEN_MARGIN - CARD_WIDTH / 2) / CARD_WIDTH),
+        int((y - SCREEN_MARGIN - CARD_HEIGHT / 2) / CARD_HEIGHT),
+    )
+
+def position_from_location(location):
+    x, y = location
+    return (
+        SCREEN_MARGIN + CARD_WIDTH / 2 + x * CARD_WIDTH,
+        SCREEN_MARGIN + CARD_HEIGHT / 2 + y * CARD_HEIGHT,
+    )
 
 
 
@@ -139,7 +158,7 @@ def can_see(point_1, point_2, allow_list, walls, max_distance=-1, check_resoluti
 
 
 class Card(arcade.Sprite):
-    def __init__(self, orig_kind):
+    def __init__(self, card_info):
         """ Card constructor """
 
         self.facing = "down"
@@ -153,14 +172,17 @@ class Card(arcade.Sprite):
             scale=1,
             hit_box_algorithm="None",
         )
+        if "variant" in card_info:
+            texture = f"{card_info['kind']}_{card_info['variant']}"
+        else:
+            texture = card_info["kind"]
         # drop texture variation in kinds
-        kind, _, variant = orig_kind.partition("_")
-        if CARD_TYPES[kind].get("directional"):
-            self.direction = variant
-        self.append_texture(arcade.load_texture(path(f"resources/{orig_kind}.png")))
-        self.kind = kind
+        self.append_texture(arcade.load_texture(path(f"resources/{texture}.png")))
+        self.kind = card_info["kind"]
         self.being_held = False
         self.orig_position = None
+        if card_info["facing"] == "up":
+            self.turn_over()
 
     @property
     def game_position(self):
@@ -180,27 +202,110 @@ class Card(arcade.Sprite):
         self.facing = "up"
         self.set_texture(1)
 
-    def can_kill(self, other_card, original_position):
-        center_x, center_y = original_position
-        if self.direction is not None:
-            if self.direction == "right":
-                if center_x >= other_card.center_x:
-                    raise ResetPosition(f"Hunter can only kill in the {self.direction} direction.")
-                    return False
-            elif self.direction == "down":
-                if center_y <= other_card.center_y:
-                    raise ResetPosition(f"Hunter can only kill in the {self.direction} direction.")
-                    return False
-            elif self.direction == "left":
-                if center_x <= other_card.center_x:
-                    raise ResetPosition(f"Hunter can only kill in the {self.direction} direction.")
-                    return False
-            elif self.direction == "up":
-                if center_y >= other_card.center_y:
-                    raise ResetPosition(f"Hunter can only kill in the {self.direction} direction.")
-                    return False
-        return other_card.kind in CARD_TYPES[self.kind].get("eats", [])
 
+class Halali:
+    def __init__(self):
+        self.can_play = True  # not fixed for multiplayer games
+        self.to_play = "animals"
+        self.cards = [[None] * N_COLS for _ in range(N_ROWS)]
+        card_pile = iter(generate_pile())
+        for x in range(N_COLS):
+            for y in range(N_ROWS):
+                if x == y == (N_COLS//2):
+                    continue
+                kind, _, variant = next(card_pile).partition("_")
+                card_type = CARD_TYPES[kind]
+                card = {
+                    "kind": kind,
+                    "facing": "down",
+                }
+                if variant:
+                    card["variant"] = variant
+                if card_type.get("directional"):
+                    card["directional"] = True
+                self.cards[x][y] = card
+
+        self.points = {team: 0 for team in TEAMS}
+        self.turns_left = None
+        self.tiles_left = 5  # N_ROWS * N_COLS - 1
+
+    def attempt_rescue(self, location):
+        if not self.can_play:
+            raise ResetPosition("Not your turn!")
+        x, y = location
+        card = self.cards[x][y]
+        if not card:
+            raise ResetPosition("Trying to move empty tile")
+        if CARD_TYPES[card["kind"]].get("team") != self.to_play:
+            raise ResetPosition("Can't rescue neutral pieces")
+        self.points[self.to_play] += CARD_TYPES[card["kind"]]["points"]
+        self._swap_teams()
+        return True
+
+    def _swap_teams(self):
+        if self.turns_left is not None:
+            if self.turns_left <= 0:
+                raise GameOver
+            self.turns_left -= 0.5
+        elif self.tiles_left == 0:
+            self.turns_left = 5
+        self.to_play = "animals" if self.to_play == "humans" else "humans"
+
+    def attempt_reveal(self, location):
+        x, y = location
+        card = self.cards[x][y]
+        if not card:
+            raise ResetPosition("Can't reveal empty spot")
+        if card["facing"] == "up":
+            raise ResetPosition("Can't reveal face-up card")
+        self.tiles_left -= 1
+        card["facing"] = "up"
+        self._swap_teams()
+        return True
+
+    def attempt_move(self, card_loc, target_loc):
+        card_x, card_y = card_loc
+        target_x, target_y = target_loc
+        if card_x == target_x and card_y == target_y:
+            raise ResetPosition("Didn't move")
+        if card_x != target_x and card_y != target_y:
+            raise ResetPosition("Can't move diagonally")
+        moving = None
+        if card_x != target_x:
+            # moving horizontally
+            smaller, bigger = min(card_x, target_x), max(card_x, target_x)
+            for inbetween in range(smaller + 1, bigger):
+                if self.cards[inbetween][card_y] is not None:
+                    raise ResetPosition("Path obstructed")
+            if card_x > target_x:
+                moving = "left"
+            else:
+                moving = "right"
+        elif card_y != target_y:
+            # moving horizontally
+            smaller, bigger = min(card_y, target_y), max(card_y, target_y)
+            for inbetween in range(smaller + 1, bigger):
+                if self.cards[card_x][inbetween] is not None:
+                    raise ResetPosition("Path obstructed")
+            if card_y > target_y:
+                moving = "down"
+            else:
+                moving = "up"
+
+        card = self.cards[card_x][card_y]
+        target = self.cards[target_x][target_y]
+        if target:
+            if target["kind"] not in CARD_TYPES[card["kind"]]["eats"]:
+                raise ResetPosition(f"{card['kind']} can't eat {target['kind']}")
+            if card.get("directional") and moving != card["variant"]:
+                raise ResetPosition(f"{card['kind']} can only kill {card['variant']}")
+        self.cards[target_x][target_y] = card
+        self.cards[card_x][card_y] = None
+        self._swap_teams()
+        return True
+
+    def available_moves(self, card):
+        pass
 
 class GameView(arcade.View):
     def __init__(self):
@@ -209,27 +314,24 @@ class GameView(arcade.View):
         self.place_list = None
         self.card_list = None
         self.held_card = None
-        self.to_play = None
-        self.points = None
+        self.game = None
         self.animal_score = None
         self.human_score = None
         self.turn_counter = None
-        self.tiled_revealed = None
         self.turns_left = None
         self.camera_game = arcade.Camera(SCREEN_WIDTH, SCREEN_HEIGHT)
         self.camera_hud = arcade.Camera(SCREEN_WIDTH, SCREEN_HEIGHT)
 
     @property
     def accent_color(self):
-        if self.to_play == "animals":
+        if self.game.to_play == "animals":
             return COLOR_ANIMALS
-        if self.to_play == "humans":
+        if self.game.to_play == "humans":
             return COLOR_HUMANS
 
     def setup(self):
+        self.game = Halali()
         arcade.set_background_color(arcade.color.AMAZON)
-        self.points = {team: 0 for team in TEAMS}
-        self.turns_left = None
 
         self.tiles_left = N_ROWS * N_COLS - 1
         self.place_list = arcade.SpriteList()
@@ -241,26 +343,11 @@ class GameView(arcade.View):
                     arcade.csscolor.DARK_OLIVE_GREEN,
                 )
                 place.is_exit = False
-                place.position = (
-                    SCREEN_MARGIN + CARD_WIDTH / 2 + x * CARD_WIDTH,
-                    SCREEN_MARGIN + CARD_HEIGHT / 2 + y * CARD_HEIGHT,
-                )
+                place.position = position_from_location((x, y))
                 self.place_list.append(place)
 
-
-
         self.card_list = arcade.SpriteList()
-        card_pile = iter(generate_pile())
-        for x in range(N_COLS):
-            for y in range(N_ROWS):
-                if x == y == (N_COLS//2):
-                    continue
-                card = Card(next(card_pile))
-                card.position = (
-                    SCREEN_MARGIN + CARD_WIDTH / 2 + x * CARD_WIDTH,
-                    SCREEN_MARGIN + CARD_HEIGHT / 2 + y * CARD_HEIGHT,
-                )
-                self.card_list.append(card)
+        self.sync_cards()
 
         self.held_card = None
 
@@ -292,7 +379,15 @@ class GameView(arcade.View):
             color=(220, 220, 220),
         )
 
-        self.to_play = "animals"
+    def sync_cards(self):
+        self.card_list.clear()
+        for x, row in enumerate(self.game.cards):
+            for y, card_info in enumerate(row):
+                if not card_info:
+                    continue
+                card = Card(card_info)
+                card.position = position_from_location((x, y))
+                self.card_list.append(card)
 
     def add_exits(self):
         for pos in [
@@ -315,31 +410,10 @@ class GameView(arcade.View):
         ]:
             exit = arcade.Sprite(
                 path("resources/center.png"),
-                # CARD_WIDTH,
-                # CARD_HEIGHT,
-                # CARD_WIDTH - 20,
-                # CARD_HEIGHT - 20,
             )
-            # exit = arcade.SpriteSolidColor(
-            #     CARD_WIDTH - 20,
-            #     CARD_HEIGHT - 20,
-            #     (102, 255, 0),
-            # )
             exit.is_exit = True
             exit.position = pos
             self.place_list.append(exit)
-
-    def swap_teams(self):
-        if self.turns_left is not None:
-            if self.turns_left <= 0:
-                game_over_view = GameOverView(self.points)
-                game_over_view.setup()
-                self.window.show_view(game_over_view)
-            self.turns_left -= 0.5
-        elif self.tiles_left == 0:
-            self.add_exits()
-            self.turns_left = 5
-        self.to_play = "animals" if self.to_play == "humans" else "humans"
 
     def pull_to_top(self, card):
         self.card_list.remove(card)
@@ -372,7 +446,7 @@ class GameView(arcade.View):
             TEXT_MARGIN * 4,
             color=COLOR_HUMANS,
         )
-        self.human_score.text = str(self.points["humans"])
+        self.human_score.text = str(self.game.points["humans"])
         self.human_score.draw()
 
         arcade.draw_rectangle_filled(
@@ -382,11 +456,11 @@ class GameView(arcade.View):
             TEXT_MARGIN * 4,
             color=COLOR_ANIMALS,
         )
-        self.animal_score.text = str(self.points["animals"])
+        self.animal_score.text = str(self.game.points["animals"])
         self.animal_score.draw()
 
-        if self.turns_left is not None:
-            x_pos = SCREEN_WIDTH // 8 * (1 if self.to_play == "animals" else 7)
+        if self.game.turns_left is not None:
+            x_pos = SCREEN_WIDTH // 8 * (1 if self.game.to_play == "animals" else 7)
             arcade.draw_rectangle_filled(
                 x_pos,
                 SCREEN_HEIGHT + TEXT_MARGIN // 2,
@@ -394,29 +468,36 @@ class GameView(arcade.View):
                 TEXT_MARGIN * 4,
                 color=self.accent_color,
             )
-            self.turn_counter.text = f"{round(self.turns_left + 0.1)} turns left"
-            if self.to_play == "animals":
+            self.turn_counter.text = f"{round(self.game.turns_left + 0.1)} turns left"
+            if self.game.to_play == "animals":
                 self.turn_counter.x = TEXT_MARGIN
                 self.turn_counter.anchor_x = "left"
-            elif self.to_play == "humans":
+            elif self.game.to_play == "humans":
                 self.turn_counter.x = SCREEN_WIDTH - TEXT_MARGIN
                 self.turn_counter.anchor_x = "right"
             self.turn_counter.draw()
 
     def on_mouse_press(self, x, y, button, key_modifiers):
+        if not self.game.can_play:
+            print("Can't play")
+            return
         cards = arcade.get_sprites_at_point((x, y), self.card_list)
         if cards:
             card = cards[-1]
-            if card.facing == "down":
+            if card.facing == "down" and self.game.attempt_reveal(
+                location_from_position(card.position),
+            ):
                 card.turn_over()
-                self.tiles_left -= 1
-                self.swap_teams()
+                if self.game.turns_left == 5:
+                    self.add_exits()
                 return
-            if card.kind not in MOVABLE_FOR[self.to_play]:
+            if card.kind not in MOVABLE_FOR[self.game.to_play]:
                 return
             self.held_card = cards[-1]
             self.held_card.hold()
             self.pull_to_top(self.held_card)
+            # TODO: use self.game.available_moves(self.held_card) to highlight
+            # those
 
     def on_mouse_motion(self, x, y, dx, dy):
         if self.held_card:
@@ -427,75 +508,40 @@ class GameView(arcade.View):
         if self.held_card:
             place, distance = arcade.get_closest_sprite(self.held_card, self.place_list)
             try:
-                if (
-                    place.is_exit
-                    and CARD_TYPES[self.held_card.kind].get("team") != self.to_play
-                ):
-                    raise ResetPosition("Can't rescue neutral pieces")
                 if not arcade.check_for_collision(self.held_card, place):
                     # Not on a place
                     raise ResetPosition("Not intersecting with a place")
-
                 if self.held_card.game_position == place.position:
+                    # Didn't move card
                     raise ResetPosition("Already at this place")
 
-                # find other card at that place
-                cards_at_place = arcade.get_sprites_at_point((x, y), self.card_list)
-                other_card = None
-                allowed = {self.held_card}
-                for card in cards_at_place:
-                    if self.held_card == card:
-                        continue
-                    other_card = card
-                    allowed.add(other_card)
+                location = location_from_position(place.position)
+                if place.is_exit:
+                    if self.game.attempt_rescue(
+                        location_from_position(self.held_card.game_position),
+                    ):
+                        self.held_card.kill()
+                        return
 
-                # Let's look for reasons we can't accept the input.
-                # Are we not going straight?
-                if not (
-                    (self.held_card.game_position[0] == place.center_x)
-                    or (self.held_card.game_position[1] == place.center_y)
+                if self.game.attempt_move(
+                    location_from_position(self.held_card.game_position),
+                    location,
                 ):
-                    raise ResetPosition("Can't go diagonally")
-
-                if CARD_TYPES[self.held_card.kind].get("slow") and arcade.get_distance(
-                    *self.held_card.game_position,
-                    place.center_x,
-                    place.center_y,
-                ) > CARD_WIDTH:
-                    raise ResetPosition(f"{self.held_card.kind} can only move 1 square")
-
-                # Do we not have a clear path (other than ourselves and targets)?
-                if not can_see(
-                    self.held_card.game_position,
-                    place.position,
-                    allowed,
-                    self.card_list,
-                ):
-                    raise ResetPosition("Not unobstructed")
-
-                # Is the other card not edible?
-                if other_card and not self.held_card.can_kill(
-                    other_card,
-                    self.held_card.game_position,
-                ):
-                    raise ResetPosition(f"Can't eat {other_card.kind}")
+                    other_cards = arcade.get_sprites_at_point(place.position, self.card_list)
+                    for other_card in other_cards:
+                        if other_card != self.held_card:
+                            print("Killing other card of type", other_card.kind)
+                            other_card.kill()
+                    self.held_card.position = place.center_x, place.center_y
 
             except ResetPosition as e:
                 print(e.args[0])
                 self.camera_game.shake(Vec2(10, 0), speed=5)
                 self.held_card.position = self.held_card.game_position
-            else:
-                if other_card:
-                    self.points[self.to_play] += CARD_TYPES[other_card.kind]["points"]
-                    other_card.kill()
-                if place.is_exit:
-                    self.points[self.to_play] += (
-                        CARD_TYPES[self.held_card.kind]["points"]
-                    )
-                    self.held_card.kill()
-                else:
-                    self.held_card.position = place.center_x, place.center_y
-                self.swap_teams()
+            except GameOver:
+                game_over_view = GameOverView(self.game.points)
+                game_over_view.setup()
+                self.window.show_view(game_over_view)
             finally:
                 self.held_card.release()
                 self.held_card = None
