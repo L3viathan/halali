@@ -1,6 +1,8 @@
 import random
+import sys
 import os
 import arcade
+import arcade.gui
 from pyglet.math import Vec2
 
 SCREEN_MARGIN = 100
@@ -227,7 +229,7 @@ class Halali:
 
         self.points = {team: 0 for team in TEAMS}
         self.turns_left = None
-        self.tiles_left = 5  # N_ROWS * N_COLS - 1
+        self.tiles_left = N_ROWS * N_COLS - 1
 
     def attempt_rescue(self, location):
         if not self.can_play:
@@ -263,9 +265,7 @@ class Halali:
         self._swap_teams()
         return True
 
-    def attempt_move(self, card_loc, target_loc):
-        card_x, card_y = card_loc
-        target_x, target_y = target_loc
+    def validate_move(self, card_x, card_y, target_x, target_y):
         if card_x == target_x and card_y == target_y:
             raise ResetPosition("Didn't move")
         if card_x != target_x and card_y != target_y:
@@ -295,24 +295,49 @@ class Halali:
         card = self.cards[card_x][card_y]
         target = self.cards[target_x][target_y]
         if target:
-            if target["kind"] not in CARD_TYPES[card["kind"]]["eats"]:
+            if target["facing"] != "up":
+                raise ResetPosition("Can't go to face-down card.")
+            if target["kind"] not in CARD_TYPES[card["kind"]].get("eats", []):
                 raise ResetPosition(f"{card['kind']} can't eat {target['kind']}")
             if card.get("directional") and moving != card["variant"]:
                 raise ResetPosition(f"{card['kind']} can only kill {card['variant']}")
-        self.cards[target_x][target_y] = card
+        return True
+
+    def attempt_move(self, card_loc, target_loc):
+        card_x, card_y = card_loc
+        target_x, target_y = target_loc
+        self.validate_move(card_x, card_y, target_x, target_y)
+        if target := self.cards[target_x][target_y]:
+            self.points[self.to_play] += CARD_TYPES[target["kind"]]["points"]
+        self.cards[target_x][target_y] = self.cards[card_x][card_y]
         self.cards[card_x][card_y] = None
         self._swap_teams()
         return True
 
-    def available_moves(self, card):
-        pass
+    def available_moves(self, location):
+        x, y = location
+        # horizontal:
+        for target_x in range(N_COLS):
+            try:
+                self.validate_move(x, y, target_x, y)
+                yield target_x, y
+            except ResetPosition:
+                pass
+        # vertical:
+        for target_y in range(N_ROWS):
+            try:
+                self.validate_move(x, y, x, target_y)
+                yield x, target_y
+            except ResetPosition:
+                pass
 
 class GameView(arcade.View):
-    def __init__(self):
+    def __init__(self, settings):
         super().__init__()
 
         self.place_list = None
         self.card_list = None
+        self.indicator_list = None
         self.held_card = None
         self.game = None
         self.animal_score = None
@@ -321,6 +346,7 @@ class GameView(arcade.View):
         self.turns_left = None
         self.camera_game = arcade.Camera(SCREEN_WIDTH, SCREEN_HEIGHT)
         self.camera_hud = arcade.Camera(SCREEN_WIDTH, SCREEN_HEIGHT)
+        self.settings = settings
 
     @property
     def accent_color(self):
@@ -347,6 +373,7 @@ class GameView(arcade.View):
                 self.place_list.append(place)
 
         self.card_list = arcade.SpriteList()
+        self.indicator_list = arcade.SpriteList()
         self.sync_cards()
 
         self.held_card = None
@@ -415,10 +442,6 @@ class GameView(arcade.View):
             exit.position = pos
             self.place_list.append(exit)
 
-    def pull_to_top(self, card):
-        self.card_list.remove(card)
-        self.card_list.append(card)
-
     def on_draw(self):
         """ Render the screen. """
         # Clear the screen
@@ -426,6 +449,10 @@ class GameView(arcade.View):
         self.camera_game.use()
         self.place_list.draw()
         self.card_list.draw()
+        if self.settings["indicators"]:
+            self.indicator_list.draw()
+        if self.held_card:
+            self.held_card.draw()
         self.camera_hud.use()
         self.draw_hud()
 
@@ -495,9 +522,17 @@ class GameView(arcade.View):
                 return
             self.held_card = cards[-1]
             self.held_card.hold()
-            self.pull_to_top(self.held_card)
-            # TODO: use self.game.available_moves(self.held_card) to highlight
-            # those
+            self.card_list.remove(self.held_card)
+            for x, y in self.game.available_moves(
+                location_from_position(card.position),
+            ):
+                indicator = arcade.SpriteSolidColor(
+                    CARD_WIDTH // 8,
+                    CARD_HEIGHT // 8,
+                    (138, 43, 226),
+                )
+                indicator.position = position_from_location((x, y))
+                self.indicator_list.append(indicator)
 
     def on_mouse_motion(self, x, y, dx, dy):
         if self.held_card:
@@ -521,16 +556,19 @@ class GameView(arcade.View):
                         location_from_position(self.held_card.game_position),
                     ):
                         self.held_card.kill()
+                        self.held_card = None
                         return
 
                 if self.game.attempt_move(
                     location_from_position(self.held_card.game_position),
                     location,
                 ):
-                    other_cards = arcade.get_sprites_at_point(place.position, self.card_list)
+                    other_cards = arcade.get_sprites_at_point(
+                        place.position,
+                        self.card_list,
+                    )
                     for other_card in other_cards:
                         if other_card != self.held_card:
-                            print("Killing other card of type", other_card.kind)
                             other_card.kill()
                     self.held_card.position = place.center_x, place.center_y
 
@@ -543,13 +581,15 @@ class GameView(arcade.View):
                 game_over_view.setup()
                 self.window.show_view(game_over_view)
             finally:
-                self.held_card.release()
-                self.held_card = None
+                if self.held_card:
+                    self.card_list.append(self.held_card)
+                    self.held_card.release()
+                    self.held_card = None
+                self.indicator_list.clear()
 
 
 class GameOverView(arcade.View):
     def __init__(self, points):
-        """ This is run once when we switch to this view """
         super().__init__()
         self.points = points
         self.texture = arcade.load_texture(path("resources/gameover.png"))
@@ -599,10 +639,64 @@ class GameOverView(arcade.View):
         self.window.show_view(game_view)
 
 
+class SetupView(arcade.View):
+    def __init__(self):
+        super().__init__()
+        self.texture = arcade.load_texture(path("resources/gameover.png"))
+        self.manager = arcade.gui.UIManager()
+        self.manager.enable()
+        self.settings = {
+            "mode": "Hot-Seat",
+            "indicators": False,
+        }
+
+        self.v_box = arcade.gui.UIBoxLayout()
+
+        start_button = arcade.gui.UIFlatButton(text="Start Game", width=200)
+        self.v_box.add(start_button.with_space_around(bottom=20))
+
+        @start_button.event("on_click")
+        def on_click_start(event):
+            self.manager.disable()
+            game_view = GameView(self.settings)
+            game_view.setup()
+            self.window.show_view(game_view)
+
+        mode_button = arcade.gui.UIFlatButton(text="Mode: Hot-Seat", width=200)
+        self.v_box.add(mode_button.with_space_around(bottom=20))
+
+        indicators_button = arcade.gui.UIFlatButton(
+            text="Indicators: off",
+            width=200,
+        )
+        self.v_box.add(indicators_button.with_space_around(bottom=20))
+        @indicators_button.event("on_click")
+        def on_click_indicators(event):
+            self.settings["indicators"] = not self.settings["indicators"]
+            label = f"Indicators: {['off', 'on'][self.settings['indicators']]}"
+            indicators_button.text = label
+
+        self.manager.add(
+            arcade.gui.UIAnchorWidget(
+                anchor_x="center_x",
+                anchor_y="center_y",
+                child=self.v_box,
+            )
+        )
+
+    def on_draw(self):
+        self.clear()
+        self.texture.draw_sized(
+            SCREEN_WIDTH / 2,
+            SCREEN_HEIGHT / 2,
+            SCREEN_WIDTH,
+            SCREEN_HEIGHT * 0.75,
+        )
+        self.manager.draw()
+
 
 if __name__ == "__main__":
     window = arcade.Window(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE)
-    start_view = GameView()
+    start_view = SetupView()
     window.show_view(start_view)
-    start_view.setup()
     arcade.run()
