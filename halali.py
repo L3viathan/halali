@@ -331,6 +331,17 @@ class Halali:
             except ResetPosition:
                 pass
 
+
+class MPServerHalali(Halali):
+    # server thread with queue
+    ...
+
+
+class MPClientHalali:
+    def __init__(self):
+        self.conn = ...  # from settings? autodiscovery?
+
+
 class GameView(arcade.View):
     def __init__(self, settings):
         super().__init__()
@@ -648,7 +659,9 @@ class SetupView(arcade.View):
         self.settings = {
             "mode": "Hot-Seat",
             "indicators": False,
+            "address": "",
         }
+
 
         self.v_box = arcade.gui.UIBoxLayout()
 
@@ -664,6 +677,17 @@ class SetupView(arcade.View):
 
         mode_button = arcade.gui.UIFlatButton(text="Mode: Hot-Seat", width=200)
         self.v_box.add(mode_button.with_space_around(bottom=20))
+
+        @mode_button.event("on_click")
+        def on_click_mode(event):
+            match self.settings["mode"]:
+                case "Hot-Seat":
+                    self.settings["mode"] = "Join"
+                case "Join":
+                    self.settings["mode"] = "Host"
+                case "Host":
+                    self.settings["mode"] = "Hot-Seat"
+            mode_button.text = f"Mode: {self.settings['mode']}"
 
         indicators_button = arcade.gui.UIFlatButton(
             text="Indicators: off",
