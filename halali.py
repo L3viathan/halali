@@ -1,9 +1,22 @@
 import random
 import sys
+import json
 import os
+import socket
+import queue
+from threading import Thread
+from time import sleep, monotonic
+from contextlib import contextmanager
 import arcade
 import arcade.gui
 from pyglet.math import Vec2
+from zeroconf import (
+    IPVersion,
+    ServiceInfo,
+    Zeroconf,
+    ServiceBrowser,
+    ServiceStateChange,
+)
 
 SCREEN_MARGIN = 100
 
@@ -11,6 +24,7 @@ SCREEN_TITLE = "Halali!"
 TEXT_MARGIN = 50
 COLOR_ANIMALS = arcade.color.AZURE
 COLOR_HUMANS = arcade.color.CARROT_ORANGE
+COLOR_NEUTRAL = (170, 170, 110)
 
 # How big are the cards?
 CARD_WIDTH = 100
@@ -96,12 +110,63 @@ for kind, data in CARD_TYPES.items():
             MOVABLE_FOR.setdefault(team, set()).add(kind)
 
 
-class ResetPosition(Exception):
+class InvalidMove(Exception):
     pass
 
 
 class GameOver(Exception):
     pass
+
+
+@contextmanager
+def advertise():
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.settimeout(0)
+        try:
+            s.connect(("10.254.254.254", 1))
+            IP = s.getsockname()[0]
+        except Exception:
+            IP = "127.0.0.1"
+    info = ServiceInfo(
+        "_halali._tcp.local.",
+        f"{random.randint(1, 1000)}._halali._tcp.local.",
+        addresses=[socket.inet_aton(IP)],
+        port=58008,
+    )
+    zc = Zeroconf(ip_version=IPVersion.All)
+    try:
+        zc.register_service(info)
+        yield
+    finally:
+        zc.unregister_service(info)
+        zc.close()
+
+
+def find_server():
+    zc = Zeroconf(ip_version=IPVersion.All)
+    server = None
+    def handler(zeroconf, service_type, name, state_change):
+        nonlocal server
+        if state_change is ServiceStateChange.Added:
+            if info := zeroconf.get_service_info(service_type, name):
+                server = (
+                    socket.inet_ntoa(info.addresses[0]),
+                    info.port,
+                )
+                return
+
+    ServiceBrowser(
+        zc,
+        ["_halali._tcp.local."],
+        handlers=[handler],
+    )
+    try:
+        for _ in range(20):
+            if server:
+                return server
+            sleep(0.2)
+    finally:
+        zc.close()
 
 
 def path(relative_path):
@@ -205,78 +270,96 @@ class Card(arcade.Sprite):
         self.set_texture(1)
 
 
+@type.__call__
+class both:
+    def __eq__(self, other):
+        return other in ("animals", "humans")
+
+
 class Halali:
-    def __init__(self):
-        self.can_play = True  # not fixed for multiplayer games
+    def __init__(self, deal=True):
         self.to_play = "animals"
+        self.team = both
         self.cards = [[None] * N_COLS for _ in range(N_ROWS)]
         card_pile = iter(generate_pile())
-        for x in range(N_COLS):
-            for y in range(N_ROWS):
-                if x == y == (N_COLS//2):
-                    continue
-                kind, _, variant = next(card_pile).partition("_")
-                card_type = CARD_TYPES[kind]
-                card = {
-                    "kind": kind,
-                    "facing": "down",
-                }
-                if variant:
-                    card["variant"] = variant
-                if card_type.get("directional"):
-                    card["directional"] = True
-                self.cards[x][y] = card
+        if deal:
+            for x in range(N_COLS):
+                for y in range(N_ROWS):
+                    if x == y == (N_COLS//2):
+                        continue
+                    kind, _, variant = next(card_pile).partition("_")
+                    card_type = CARD_TYPES[kind]
+                    card = {
+                        "kind": kind,
+                        "facing": "down",
+                    }
+                    if variant:
+                        card["variant"] = variant
+                    if card_type.get("directional"):
+                        card["directional"] = True
+                    self.cards[x][y] = card
 
         self.points = {team: 0 for team in TEAMS}
         self.turns_left = None
-        self.tiles_left = N_ROWS * N_COLS - 1
+        self._tiles_left = N_ROWS * N_COLS - 1
 
-    def attempt_rescue(self, location):
-        if not self.can_play:
-            raise ResetPosition("Not your turn!")
+    @property
+    def can_play(self):
+        return self.to_play == self.team
+
+    def check_can_play(self, for_enemy=False):
+        if for_enemy:
+            if self.can_play:
+                raise InvalidMove("Not other player's turn!")
+        else:
+            if not self.can_play:
+                raise InvalidMove("Not your turn!")
+
+    def attempt_rescue(self, location, for_enemy=False):
+        self.check_can_play(for_enemy=for_enemy)
         x, y = location
         card = self.cards[x][y]
         if not card:
-            raise ResetPosition("Trying to move empty tile")
+            raise InvalidMove("Trying to move empty tile")
         if CARD_TYPES[card["kind"]].get("team") != self.to_play:
-            raise ResetPosition("Can't rescue neutral pieces")
+            raise InvalidMove("Can't rescue neutral pieces")
+        self.cards[x][y] = None
         self.points[self.to_play] += CARD_TYPES[card["kind"]]["points"]
         self._swap_teams()
         return True
 
     def _swap_teams(self):
         if self.turns_left is not None:
-            if self.turns_left <= 0:
-                raise GameOver
             self.turns_left -= 0.5
-        elif self.tiles_left == 0:
+        elif self._tiles_left == 0:
             self.turns_left = 5
         self.to_play = "animals" if self.to_play == "humans" else "humans"
 
-    def attempt_reveal(self, location):
+    def attempt_reveal(self, location, for_enemy=False):
+        self.check_can_play(for_enemy=for_enemy)
         x, y = location
         card = self.cards[x][y]
         if not card:
-            raise ResetPosition("Can't reveal empty spot")
+            raise InvalidMove("Can't reveal empty spot")
         if card["facing"] == "up":
-            raise ResetPosition("Can't reveal face-up card")
-        self.tiles_left -= 1
+            raise InvalidMove("Can't reveal face-up card")
+        self._tiles_left -= 1
         card["facing"] = "up"
         self._swap_teams()
         return True
 
     def validate_move(self, card_x, card_y, target_x, target_y):
         if card_x == target_x and card_y == target_y:
-            raise ResetPosition("Didn't move")
+            raise InvalidMove("Didn't move")
         if card_x != target_x and card_y != target_y:
-            raise ResetPosition("Can't move diagonally")
+            raise InvalidMove("Can't move diagonally")
         moving = None
         if card_x != target_x:
             # moving horizontally
             smaller, bigger = min(card_x, target_x), max(card_x, target_x)
             for inbetween in range(smaller + 1, bigger):
                 if self.cards[inbetween][card_y] is not None:
-                    raise ResetPosition("Path obstructed")
+                    raise InvalidMove("Path obstructed")
             if card_x > target_x:
                 moving = "left"
             else:
@@ -286,24 +369,27 @@ class Halali:
             smaller, bigger = min(card_y, target_y), max(card_y, target_y)
             for inbetween in range(smaller + 1, bigger):
                 if self.cards[card_x][inbetween] is not None:
-                    raise ResetPosition("Path obstructed")
+                    raise InvalidMove("Path obstructed")
             if card_y > target_y:
                 moving = "down"
             else:
                 moving = "up"
 
         card = self.cards[card_x][card_y]
+        if not card:
+            raise InvalidMove("Can't move empty tile")
         target = self.cards[target_x][target_y]
         if target:
             if target["facing"] != "up":
-                raise ResetPosition("Can't go to face-down card.")
+                raise InvalidMove("Can't go to face-down card.")
             if target["kind"] not in CARD_TYPES[card["kind"]].get("eats", []):
-                raise ResetPosition(f"{card['kind']} can't eat {target['kind']}")
+                raise InvalidMove(f"{card['kind']} can't eat {target['kind']}")
             if card.get("directional") and moving != card["variant"]:
-                raise ResetPosition(f"{card['kind']} can only kill {card['variant']}")
+                raise InvalidMove(f"{card['kind']} can only kill {card['variant']}")
         return True
 
-    def attempt_move(self, card_loc, target_loc):
+    def attempt_move(self, card_loc, target_loc, for_enemy=False):
+        self.check_can_play(for_enemy=for_enemy)
         card_x, card_y = card_loc
         target_x, target_y = target_loc
         self.validate_move(card_x, card_y, target_x, target_y)
@@ -321,25 +407,246 @@ class Halali:
             try:
                 self.validate_move(x, y, target_x, y)
                 yield target_x, y
-            except ResetPosition:
+            except InvalidMove:
                 pass
         # vertical:
         for target_y in range(N_ROWS):
             try:
                 self.validate_move(x, y, x, target_y)
                 yield x, target_y
-            except ResetPosition:
+            except InvalidMove:
                 pass
 
+    def update(self, _view):
+        if self.turns_left is not None and self.turns_left <= 0:
+            raise GameOver
 
-class MPServerHalali(Halali):
+
+def server(send, recv):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("", 58008))
+        s.listen(1)
+        print("Waiting for connection...")
+        with advertise():
+            conn, addr = s.accept()
+        print(addr, "connected")
+        while True:
+            msg = conn.recv(8192)
+            if not msg:
+                recv.put(["disconnected"])
+                return
+            recv.put(json.loads(msg))  # TODO: make resilient
+            while True:
+                response = send.get()  # blocking, wait for game to respond
+                if not response and send.qsize():
+                    continue  # not guaranteed to work
+                break
+            print("Actually sending...")
+            conn.sendall(json.dumps(response, separators=",:").encode())
+    finally:
+        s.close()
+
+
+class NetworkedHalali(Halali):
+    def attempt_move(self, card_loc, target_loc, for_enemy=False):
+        super().attempt_move(card_loc, target_loc, for_enemy=for_enemy)
+        if not for_enemy:
+            self.send_queue.put(["move", card_loc, target_loc])
+        return True
+
+    def attempt_reveal(self, location, for_enemy=False):
+        print("attempting reveal")
+        super().attempt_reveal(location, for_enemy=for_enemy)
+        print("success, communicating reveal")
+        if not for_enemy:
+            self.send_queue.put(["reveal", location])
+        return True
+
+    def attempt_rescue(self, location, for_enemy=False):
+        super().attempt_rescue(location, for_enemy=for_enemy)
+        if not for_enemy:
+            self.send_queue.put(["rescue", location])
+        return True
+
+    # def _swap_teams(self):
+    #     super()._swap_teams()
+    #     if self._tiles_left == 0:
+    #         self.turns_left = 5
+    #     self.to_play = "animals" if self.to_play == "humans" else "humans"
+
+
+
+class MPServerHalali(NetworkedHalali):
     # server thread with queue
-    ...
-
-
-class MPClientHalali:
     def __init__(self):
-        self.conn = ...  # from settings? autodiscovery?
+        super().__init__()
+        self.send_queue, self.recv_queue = queue.Queue(), queue.Queue()
+        Thread(target=server, kwargs={
+            "send": self.send_queue,
+            "recv": self.recv_queue,
+        }).start()
+        self.team = random.choice(["animals", "humans"])
+
+    def update(self, view):
+        super().update(view)
+        # respond to incoming requests, if any
+        response = None
+        try:
+            message = self.recv_queue.get(block=False, timeout=0)
+        except queue.Empty:
+            return
+        print("Qstat:", self.send_queue.qsize(), self.recv_queue.qsize())
+        print("Got message:", message)
+        match message:
+            case ["status"]:
+                response = [
+                    "status",
+                    {
+                        "to_play": self.to_play,
+                        "client_team": ("animals"if self.team == "humans"else "humans"),
+                        "points": self.points,
+                    },
+                ]
+            case ["disconnected"]:
+                ...  # go to main window
+            case ["ping"]:
+                response = None
+            case ["cards"]:
+                response = ["cards", self.cards]
+            case ["move", source, target]:
+                try:
+                    self.attempt_move(source, target, for_enemy=True)
+                    view.move(source, target)
+                except InvalidMove as e:
+                    # TODO: say what has to be undone
+                    response = ["FIXME", "wrong move", e.args[0]]
+                else:
+                    response = ["ok"]
+            case ["reveal", location]:
+                try:
+                    self.attempt_reveal(location, for_enemy=True)
+                    view.reveal(location)
+                except InvalidMove as e:
+                    # TODO: say what has to be undone
+                    response = ["FIXME", "wrong reveal", e.args[0]]
+                else:
+                    response = ["ok"]
+            case ["rescue", location]:
+                try:
+                    self.attempt_rescue(location, for_enemy=True)
+                    view.rescue(location)
+                except InvalidMove as e:
+                    # TODO: say what has to be undone
+                    response = ["FIXME", "wrong rescue", e.args[0]]
+                else:
+                    response = ["ok"]
+            case other:
+                print("Unknown message", other)
+                raise RuntimeError
+        print("Answering", response)
+        self.send_queue.put(response)
+
+
+def client(send, recv):
+    conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    print("Connecting...")
+    conn.connect(find_server())
+    print("Connected!")
+    while True:
+        try:
+            msg = send.get(block=False, timeout=0)
+        except queue.Empty:
+            sleep(0.5)
+            continue
+            # msg = {"T": "status"}
+        conn.sendall(json.dumps(msg, separators=",:").encode())
+        data = conn.recv(8192)
+        if not data:
+            return
+        print("Received:", data)
+        recv.put(json.loads(data))
+        sleep(0.2)
+
+
+class MPClientHalali(NetworkedHalali):
+    def __init__(self):
+        super().__init__(deal=False)
+        self.send_queue, self.recv_queue = queue.Queue(), queue.Queue()
+        Thread(target=client, kwargs={
+            "send": self.send_queue,
+            "recv": self.recv_queue,
+        }).start()
+        self.send_queue.put(["status"])
+        self.send_queue.put(["cards"])
+        self.handle_response(None, block=True)
+        self.handle_response(None, block=True)
+        self.send_queue
+        self.last_update = monotonic()
+        self.update()
+
+    def update(self, view=None):
+        super().update(view)
+        # make outgoing status requests every 0.5s
+        t = monotonic()
+        if t - self.last_update > 0.5:
+            self.send_queue.put(["ping"])
+            self.last_update = monotonic()
+        self.handle_response(view)
+
+    def handle_response(self, view, block=False):
+        try:
+            message = self.recv_queue.get(block=block)
+        except queue.Empty:
+            return
+        print("Qstat:", self.send_queue.qsize(), self.recv_queue.qsize())
+        match message:
+            case ["status", status]:
+                self.to_play = status["to_play"]
+                self.team = status["client_team"]
+                self.points = status["points"]
+                self.turns_left = status.get("turns_left", None)
+            case ["ok"]:
+                pass
+            case None:  # "pong"
+                pass
+            case ["disconnected"]:
+                ...  # go to main window
+            case ["cards", cards]:
+                self.cards = cards
+            case ["move", source, target]:
+                try:
+                    self.attempt_move(source, target, for_enemy=True)
+                    view.move(source, target)
+                except InvalidMove:
+                    # TODO: handle desync. Fetch everything again?
+                    pass
+            case ["reveal", location]:
+                try:
+                    self.attempt_reveal(location, for_enemy=True)
+                    view.reveal(location)
+                except InvalidMove:
+                    # TODO: handle desync. Fetch everything again?
+                    pass
+            case ["rescue", location]:
+                try:
+                    self.attempt_rescue(location, for_enemy=True)
+                    view.rescue(location)
+                    # FIXME: also remove card
+                except InvalidMove:
+                    # TODO: handle desync. Fetch everything again?
+                    pass
+            case other:
+                print("Unknown message", other)
+                raise RuntimeError
+
+    # to_play
+    # turns_left
+    # can_play
+    # points
+    # attempt_move()
+    # attempt_rescue()
+    # attempt_reveal()
 
 
 class GameView(arcade.View):
@@ -354,23 +661,50 @@ class GameView(arcade.View):
         self.animal_score = None
         self.human_score = None
         self.turn_counter = None
-        self.turns_left = None
         self.camera_game = arcade.Camera(SCREEN_WIDTH, SCREEN_HEIGHT)
         self.camera_hud = arcade.Camera(SCREEN_WIDTH, SCREEN_HEIGHT)
         self.settings = settings
+        self._exits_added = False
+
+    def reveal(self, location):
+        # used by multiplayer. also for singleplayer?
+        position = position_from_location(location)
+        for card in arcade.get_sprites_at_point(position, self.card_list):
+            card.turn_over()
+
+    def rescue(self, location):
+        # used by multiplayer. also for singleplayer?
+        position = position_from_location(location)
+        for card in arcade.get_sprites_at_point(position, self.card_list):
+            card.kill()
+
+    def move(self, source, target):
+        # used by multiplayer. also for singleplayer?
+        target_position = position_from_location(target)
+        for card in arcade.get_sprites_at_point(target_position, self.card_list):
+            card.kill()
+        source_position = position_from_location(source)
+        for card in arcade.get_sprites_at_point(source_position, self.card_list):
+            card.position = position_from_location(target)
 
     @property
     def accent_color(self):
-        if self.game.to_play == "animals":
-            return COLOR_ANIMALS
-        if self.game.to_play == "humans":
-            return COLOR_HUMANS
+        if self.game.can_play:
+            if self.game.to_play == "animals":
+                return COLOR_ANIMALS
+            if self.game.to_play == "humans":
+                return COLOR_HUMANS
+        return COLOR_NEUTRAL
 
     def setup(self):
-        self.game = Halali()
+        if self.settings["mode"] == "Hot-Seat":
+            self.game = Halali()
+        elif self.settings["mode"] == "Host":
+            self.game = MPServerHalali()
+        elif self.settings["mode"] == "Join":
+            self.game = MPClientHalali()
         arcade.set_background_color(arcade.color.AMAZON)
 
-        self.tiles_left = N_ROWS * N_COLS - 1
         self.place_list = arcade.SpriteList()
         for x in range(N_COLS):
             for y in range(N_ROWS):
@@ -428,6 +762,7 @@ class GameView(arcade.View):
                 self.card_list.append(card)
 
     def add_exits(self):
+        self._exits_added = True
         for pos in [
             (
                 SCREEN_MARGIN + CARD_WIDTH / 2 + (N_COLS // 2) * CARD_WIDTH,
@@ -522,28 +857,26 @@ class GameView(arcade.View):
         cards = arcade.get_sprites_at_point((x, y), self.card_list)
         if cards:
             card = cards[-1]
-            if card.facing == "down" and self.game.attempt_reveal(
-                location_from_position(card.position),
-            ):
+            loc = location_from_position(card.position)
+            if card.facing == "down" and self.game.attempt_reveal(loc):
                 card.turn_over()
-                if self.game.turns_left == 5:
-                    self.add_exits()
                 return
             if card.kind not in MOVABLE_FOR[self.game.to_play]:
                 return
             self.held_card = cards[-1]
             self.held_card.hold()
             self.card_list.remove(self.held_card)
-            for x, y in self.game.available_moves(
-                location_from_position(card.position),
-            ):
-                indicator = arcade.SpriteSolidColor(
-                    CARD_WIDTH // 8,
-                    CARD_HEIGHT // 8,
-                    (138, 43, 226),
-                )
-                indicator.position = position_from_location((x, y))
-                self.indicator_list.append(indicator)
+            if self.settings["indicators"]:
+                for x, y in self.game.available_moves(
+                    location_from_position(card.position),
+                ):
+                    indicator = arcade.SpriteSolidColor(
+                        CARD_WIDTH // 8,
+                        CARD_HEIGHT // 8,
+                        (138, 43, 226),
+                    )
+                    indicator.position = position_from_location((x, y))
+                    self.indicator_list.append(indicator)
 
     def on_mouse_motion(self, x, y, dx, dy):
         if self.held_card:
@@ -556,10 +889,10 @@ class GameView(arcade.View):
             try:
                 if not arcade.check_for_collision(self.held_card, place):
                     # Not on a place
-                    raise ResetPosition("Not intersecting with a place")
+                    raise InvalidMove("Not intersecting with a place")
                 if self.held_card.game_position == place.position:
                     # Didn't move card
-                    raise ResetPosition("Already at this place")
+                    raise InvalidMove("Already at this place")
 
                 location = location_from_position(place.position)
                 if place.is_exit:
@@ -583,20 +916,27 @@ class GameView(arcade.View):
                             other_card.kill()
                     self.held_card.position = place.center_x, place.center_y
 
-            except ResetPosition as e:
+            except InvalidMove as e:
                 print(e.args[0])
                 self.camera_game.shake(Vec2(10, 0), speed=5)
                 self.held_card.position = self.held_card.game_position
-            except GameOver:
-                game_over_view = GameOverView(self.game.points)
-                game_over_view.setup()
-                self.window.show_view(game_over_view)
             finally:
                 if self.held_card:
                     self.card_list.append(self.held_card)
                     self.held_card.release()
                     self.held_card = None
                 self.indicator_list.clear()
+
+    def update(self, delta_time):
+        if self.game.turns_left is not None and not self._exits_added:
+            self.add_exits()
+        if not self.held_card:
+            try:
+                self.game.update(self)
+            except GameOver:
+                game_over_view = GameOverView(self.game.points)
+                game_over_view.setup()
+                self.window.show_view(game_over_view)
 
 
 class GameOverView(arcade.View):
@@ -645,9 +985,7 @@ class GameOverView(arcade.View):
 
     def on_mouse_press(self, _x, _y, _button, _modifiers):
         """ If the user presses the mouse button, re-start the game. """
-        game_view = GameView()
-        game_view.setup()
-        self.window.show_view(game_view)
+        self.window.show_view(SetupView())
 
 
 class SetupView(arcade.View):
