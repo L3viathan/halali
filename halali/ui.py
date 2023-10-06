@@ -525,18 +525,20 @@ class GameOverView(arcade.View):
 
 class SetupView(arcade.View):
     def __init__(self):
-        # TODO: make settings data-driven and walkable
         super().__init__()
         self.texture = arcade.load_texture(path("resources/gameover.png"))
         self.manager = arcade.gui.UIManager()
         self.manager.enable()
         self.settings = {
-            "mode": "Hot-Seat",
-            "indicators": False,
-            "address": "",
-            "music": True,
+            "mode": ["Hot-Seat", "Join", "Host"],
+            "indicators": [False, True],
+            "music": [True, False],
         }
+        self.show_settings()
 
+    def show_settings(self):
+        # TODO: make settings walkable (multi-level)
+        self.manager.clear()
 
         self.v_box = arcade.gui.UIBoxLayout()
 
@@ -546,45 +548,22 @@ class SetupView(arcade.View):
         @start_button.event("on_click")
         def on_click_start(event):
             self.manager.disable()
-            game_view = GameView(self.settings)
+            settings = {
+                k: v[0]
+                for k, v in self.settings.items()
+            }
+            game_view = GameView(settings)
             game_view.setup()
             self.window.show_view(game_view)
 
-        mode_button = arcade.gui.UIFlatButton(text="Mode: Hot-Seat", width=200)
-        self.v_box.add(mode_button.with_space_around(bottom=20))
-
-        @mode_button.event("on_click")
-        def on_click_mode(event):
-            match self.settings["mode"]:
-                case "Hot-Seat":
-                    self.settings["mode"] = "Join"
-                case "Join":
-                    self.settings["mode"] = "Host"
-                case "Host":
-                    self.settings["mode"] = "Hot-Seat"
-            mode_button.text = f"Mode: {self.settings['mode']}"
-
-        music_button = arcade.gui.UIFlatButton(
-            text="Music: on",
-            width=200,
-        )
-        self.v_box.add(music_button.with_space_around(bottom=20))
-        @music_button.event("on_click")
-        def on_click_music(event):
-            self.settings["music"] = not self.settings["music"]
-            label = f"Music: {['off', 'on'][self.settings['music']]}"
-            music_button.text = label
-
-        indicators_button = arcade.gui.UIFlatButton(
-            text="Indicators: off",
-            width=200,
-        )
-        self.v_box.add(indicators_button.with_space_around(bottom=20))
-        @indicators_button.event("on_click")
-        def on_click_indicators(event):
-            self.settings["indicators"] = not self.settings["indicators"]
-            label = f"Indicators: {['off', 'on'][self.settings['indicators']]}"
-            indicators_button.text = label
+        for name, options in self.settings.items():
+            default_text = f"{name.title()}: { {True: 'on', False: 'off'}.get(options[0], options[0])}"
+            button = arcade.gui.UIFlatButton(text=default_text, width=200)
+            self.v_box.add(button.with_space_around(bottom=20))
+            @button.event("on_click")
+            def on_click(event, name=name, button=button, options=options):
+                self.settings[name].append(self.settings[name].pop(0))
+                button.text = f"{name.title()}: { {True: 'on', False: 'off'}.get(options[0], options[0])}"
 
         self.manager.add(
             arcade.gui.UIAnchorWidget(
