@@ -225,6 +225,16 @@ class GameView(arcade.View):
             self.game = MPServerHalali()
         elif self.settings["mode"] == "Join":
             self.game = MPClientHalali()
+
+        if self.settings["music"]:
+            self.bgmusic = arcade.play_sound(
+                arcade.load_sound(path("resources/nature-walk-124997.wav")),
+                looping=True,
+            )
+        else:
+            self.bgmusic = None
+
+
         arcade.set_background_color(arcade.color.AMAZON)
 
         self.place_list = arcade.SpriteList()
@@ -457,6 +467,8 @@ class GameView(arcade.View):
             try:
                 self.game.update(self)
             except GameOver:
+                if self.bgmusic:
+                    arcade.stop_sound(self.bgmusic)
                 game_over_view = GameOverView(self.game.points)
                 game_over_view.setup()
                 self.window.show_view(game_over_view)
@@ -513,6 +525,7 @@ class GameOverView(arcade.View):
 
 class SetupView(arcade.View):
     def __init__(self):
+        # TODO: make settings data-driven and walkable
         super().__init__()
         self.texture = arcade.load_texture(path("resources/gameover.png"))
         self.manager = arcade.gui.UIManager()
@@ -521,6 +534,7 @@ class SetupView(arcade.View):
             "mode": "Hot-Seat",
             "indicators": False,
             "address": "",
+            "music": True,
         }
 
 
@@ -549,6 +563,17 @@ class SetupView(arcade.View):
                 case "Host":
                     self.settings["mode"] = "Hot-Seat"
             mode_button.text = f"Mode: {self.settings['mode']}"
+
+        music_button = arcade.gui.UIFlatButton(
+            text="Music: on",
+            width=200,
+        )
+        self.v_box.add(music_button.with_space_around(bottom=20))
+        @music_button.event("on_click")
+        def on_click_music(event):
+            self.settings["music"] = not self.settings["music"]
+            label = f"Music: {['off', 'on'][self.settings['music']]}"
+            music_button.text = label
 
         indicators_button = arcade.gui.UIFlatButton(
             text="Indicators: off",
