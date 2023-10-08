@@ -226,7 +226,7 @@ class GameView(arcade.View):
         elif self.settings["mode"] == "Join":
             self.game = MPClientHalali()
 
-        if self.settings["music"]:
+        if self.settings["settings"]["music"]:
             self.bgmusic = arcade.play_sound(
                 arcade.load_sound(path("resources/nature-walk-124997.wav")),
                 looping=True,
@@ -298,6 +298,7 @@ class GameView(arcade.View):
         print("Syncing..")
         self.sync_cards()
 
+
     def add_exits(self):
         self._exits_added = True
         for pos in [
@@ -332,7 +333,7 @@ class GameView(arcade.View):
         self.camera_game.use()
         self.place_list.draw()
         self.card_list.draw()
-        if self.settings["indicators"]:
+        if self.settings["settings"]["indicators"]:
             self.indicator_list.draw()
         if self.held_card:
             self.held_card.draw()
@@ -403,7 +404,7 @@ class GameView(arcade.View):
             self.held_card = cards[-1]
             self.held_card.hold()
             self.card_list.remove(self.held_card)
-            if self.settings["indicators"]:
+            if self.settings["settings"]["indicators"]:
                 for x, y in self.game.available_moves(
                     location_from_position(card.position),
                 ):
@@ -523,47 +524,93 @@ class GameOverView(arcade.View):
         self.window.show_view(SetupView())
 
 
+def build_settings(structure):
+    settings = {}
+    for part in structure:
+        label = part["label"].lower()
+        match part["type"]:
+            case "menu":
+                settings[label] = build_settings(part["content"])
+            case "view":
+                continue
+            case "bool":
+                settings[label] = part["value"]
+            case "choice":
+                settings[label] = part["choices"][0]
+            case other:
+                raise RuntimeError(f"Unknown settings type {other}")
+    return settings
+
+
 class SetupView(arcade.View):
     def __init__(self):
         super().__init__()
         self.texture = arcade.load_texture(path("resources/gameover.png"))
         self.manager = arcade.gui.UIManager()
         self.manager.enable()
-        self.settings = {
-            "mode": ["Hot-Seat", "Join", "Host"],
-            "indicators": [False, True],
-            "music": [True, False],
-        }
+        self.settings = [
+            {"label": "Play", "type": "view", "view": GameView},
+            {"label": "Mode", "type": "choice", "choices": ["Hot-Seat", "Join", "Host"]},
+            {"label": "Settings", "type": "menu", "content": [
+                {"label": "Indicators", "type": "bool", "value": False},
+                {"label": "Music", "type": "bool", "value": True},
+                {"label": "Sounds", "type": "bool", "value": True},
+            ]},
+        ]
+        self._stack = []
         self.show_settings()
 
     def show_settings(self):
-        # TODO: make settings walkable (multi-level)
         self.manager.clear()
 
         self.v_box = arcade.gui.UIBoxLayout()
 
-        start_button = arcade.gui.UIFlatButton(text="Start Game", width=200)
-        self.v_box.add(start_button.with_space_around(bottom=20))
+        elements = self.settings
+        for part in self._stack:
+            elements = elements[part]["content"]
 
-        @start_button.event("on_click")
-        def on_click_start(event):
-            self.manager.disable()
-            settings = {
-                k: v[0]
-                for k, v in self.settings.items()
-            }
-            game_view = GameView(settings)
-            game_view.setup()
-            self.window.show_view(game_view)
+        if self._stack:
+            back_button = arcade.gui.UIFlatButton(text="Back", width=200)
+            self.v_box.add(back_button.with_space_around(bottom=20))
 
-        for name, options in self.settings.items():
-            default_text = f"{name.title()}: { {True: 'on', False: 'off'}.get(options[0], options[0])}"
-            button = arcade.gui.UIFlatButton(text=default_text, width=200)
+            @back_button.event("on_click")
+            def on_click_back(event):
+                self._stack.pop()
+                self.show_settings()
+
+        for i, element in enumerate(elements):
+            button = arcade.gui.UIFlatButton(text="", width=200)
+            label = element["label"]
+            match element["type"]:
+                case "bool":
+                    text = f"{label.title()}: { {True: 'on', False: 'off'}[element['value']]}"
+                    def on_click(event, label=label, button=button, element=element):
+                        element["value"] = not element["value"]
+                        button.text = f"{label.title()}: { {True: 'on', False: 'off'}[element['value']]}"
+
+                case "choice":
+                    text = f"{label.title()}: {element['choices'][0]}"
+                    def on_click(event, label=label, button=button, element=element):
+                        element["value"].append(element["value"].pop(0))
+                        button.text = f"{label.title()}: { {True: 'on', False: 'off'}[element['value']]}"
+
+                case "menu":
+                    text = label
+                    def on_click(event, i=i):
+                        self._stack.append(i)
+                        self.show_settings()
+
+                case "view":
+                    text = label
+                    def on_click(event):
+                        self._stack = []
+                        game_view = GameView(build_settings(self.settings))
+                        game_view.setup()
+                        self.window.show_view(game_view)
+
+            button.text = text
             self.v_box.add(button.with_space_around(bottom=20))
-            @button.event("on_click")
-            def on_click(event, name=name, button=button, options=options):
-                self.settings[name].append(self.settings[name].pop(0))
-                button.text = f"{name.title()}: { {True: 'on', False: 'off'}.get(options[0], options[0])}"
+            button.event("on_click")(on_click)
 
         self.manager.add(
             arcade.gui.UIAnchorWidget(
