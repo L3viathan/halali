@@ -12,8 +12,7 @@ from .game import (
     MOVABLE_FOR,
     InvalidMove,
     GameOver,
-    N_COLS,
-    N_ROWS,
+    N_ROWS_AND_COLS,
 )
 
 SCREEN_MARGIN = 100
@@ -25,17 +24,16 @@ COLOR_HUMANS = arcade.color.CARROT_ORANGE
 COLOR_NEUTRAL = (170, 170, 110)
 
 # How big are the cards?
-CARD_WIDTH = 100
-CARD_HEIGHT = 100
+CARD_SIZE = 100
 
-SCREEN_WIDTH = N_COLS * CARD_WIDTH + 2 * SCREEN_MARGIN
-SCREEN_HEIGHT = N_ROWS * CARD_HEIGHT + 2 * SCREEN_MARGIN
+SCREEN_WIDTH = N_ROWS_AND_COLS * CARD_SIZE + 2 * SCREEN_MARGIN
+SCREEN_HEIGHT = N_ROWS_AND_COLS * CARD_SIZE + 2 * SCREEN_MARGIN
 BORDER_WIDTH = 15
 
 # How big is the mat we'll place the card on?
 MAT_PERCENT_OVERSIZE = 1.25
-MAT_HEIGHT = int(CARD_HEIGHT * MAT_PERCENT_OVERSIZE)
-MAT_WIDTH = int(CARD_WIDTH * MAT_PERCENT_OVERSIZE)
+MAT_HEIGHT = int(CARD_SIZE * MAT_PERCENT_OVERSIZE)
+MAT_WIDTH = int(CARD_SIZE * MAT_PERCENT_OVERSIZE)
 
 # How much space do we leave as a gap between the mats?
 # Done as a percent of the mat size.
@@ -62,15 +60,15 @@ def path(relative_path):
 def location_from_position(position):
     x, y = position
     return (
-        int((x - SCREEN_MARGIN - CARD_WIDTH / 2) / CARD_WIDTH),
-        int((y - SCREEN_MARGIN - CARD_HEIGHT / 2) / CARD_HEIGHT),
+        int((x - SCREEN_MARGIN - CARD_SIZE / 2) / CARD_SIZE),
+        int((y - SCREEN_MARGIN - CARD_SIZE / 2) / CARD_SIZE),
     )
 
 def position_from_location(location):
     x, y = location
     return (
-        SCREEN_MARGIN + CARD_WIDTH / 2 + x * CARD_WIDTH,
-        SCREEN_MARGIN + CARD_HEIGHT / 2 + y * CARD_HEIGHT,
+        SCREEN_MARGIN + CARD_SIZE / 2 + x * CARD_SIZE,
+        SCREEN_MARGIN + CARD_SIZE / 2 + y * CARD_SIZE,
     )
 
 
@@ -112,7 +110,7 @@ class Card(arcade.Sprite):
     ):
         if dynamic_time:
             dist = arcade.get_distance(*self.position, *new_position)
-            time *= max(1.5, (dist / CARD_WIDTH))
+            time *= max(1.5, (dist / CARD_SIZE))
         ex, ey = arcade.ease_position(
             self.position,
             new_position,
@@ -186,11 +184,11 @@ class GameView(arcade.View):
         arcade.set_background_color(arcade.color.AMAZON)
 
         self.place_list = arcade.SpriteList()
-        for x in range(N_COLS):
-            for y in range(N_ROWS):
+        for x in range(N_ROWS_AND_COLS):
+            for y in range(N_ROWS_AND_COLS):
                 place = arcade.SpriteSolidColor(
-                    CARD_WIDTH - 20,
-                    CARD_HEIGHT - 20,
+                    CARD_SIZE - 20,
+                    CARD_SIZE - 20,
                     arcade.csscolor.DARK_OLIVE_GREEN,
                 )
                 place.is_exit = False
@@ -297,20 +295,20 @@ class GameView(arcade.View):
         self._exits_added = True
         for pos in [
             (
-                SCREEN_MARGIN + CARD_WIDTH / 2 + (N_COLS // 2) * CARD_WIDTH,
-                SCREEN_MARGIN + CARD_HEIGHT / 2 + -1 * CARD_HEIGHT,
+                SCREEN_MARGIN + CARD_SIZE / 2 + (N_ROWS_AND_COLS // 2) * CARD_SIZE,
+                SCREEN_MARGIN + CARD_SIZE / 2 + -1 * CARD_SIZE,
             ),
             (
-                SCREEN_MARGIN + CARD_WIDTH / 2 + (N_COLS // 2) * CARD_WIDTH,
-                SCREEN_MARGIN + CARD_HEIGHT / 2 + N_ROWS * CARD_HEIGHT,
+                SCREEN_MARGIN + CARD_SIZE / 2 + (N_ROWS_AND_COLS // 2) * CARD_SIZE,
+                SCREEN_MARGIN + CARD_SIZE / 2 + N_ROWS_AND_COLS * CARD_SIZE,
             ),
             (
-                SCREEN_MARGIN + CARD_WIDTH / 2 + -1 * CARD_WIDTH,
-                SCREEN_MARGIN + CARD_HEIGHT / 2 + (N_COLS // 2) * CARD_HEIGHT,
+                SCREEN_MARGIN + CARD_SIZE / 2 + -1 * CARD_SIZE,
+                SCREEN_MARGIN + CARD_SIZE / 2 + (N_ROWS_AND_COLS // 2) * CARD_SIZE,
             ),
             (
-                SCREEN_MARGIN + CARD_WIDTH / 2 + N_ROWS * CARD_WIDTH,
-                SCREEN_MARGIN + CARD_HEIGHT / 2 + (N_COLS // 2) * CARD_HEIGHT,
+                SCREEN_MARGIN + CARD_SIZE / 2 + N_ROWS_AND_COLS * CARD_SIZE,
+                SCREEN_MARGIN + CARD_SIZE / 2 + (N_ROWS_AND_COLS // 2) * CARD_SIZE,
             ),
         ]:
             exit = arcade.Sprite(
@@ -403,8 +401,8 @@ class GameView(arcade.View):
                     location_from_position(card.position),
                 ):
                     indicator = arcade.SpriteSolidColor(
-                        CARD_WIDTH // 8,
-                        CARD_HEIGHT // 8,
+                        CARD_SIZE // 8,
+                        CARD_SIZE // 8,
                         (138, 43, 226),
                     )
                     indicator.position = position_from_location((x, y))

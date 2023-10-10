@@ -8,8 +8,7 @@ import arcade
 
 from .networking import server, client
 
-N_ROWS = 7
-N_COLS = 7
+N_ROWS_AND_COLS = 7
 TEAMS = ["humans", "animals"]
 
 CARD_TYPES = {
@@ -114,12 +113,12 @@ class Halali:
     def __init__(self, deal=True):
         self.to_play = "animals"
         self.team = both
-        self.cards = [[None] * N_COLS for _ in range(N_ROWS)]
+        self.cards = [[None] * N_ROWS_AND_COLS for _ in range(N_ROWS_AND_COLS)]
         card_pile = iter(generate_pile())
         if deal:
-            for x in range(N_COLS):
-                for y in range(N_ROWS):
-                    if x == y == (N_COLS//2):
+            for x in range(N_ROWS_AND_COLS):
+                for y in range(N_ROWS_AND_COLS):
+                    if x == y == (N_ROWS_AND_COLS//2):
                         continue
                     kind, _, variant = next(card_pile).partition("_")
                     card_type = CARD_TYPES[kind]
@@ -135,7 +134,7 @@ class Halali:
 
         self.points = {team: 0 for team in TEAMS}
         self.turns_left = None
-        self._tiles_left = N_ROWS * N_COLS - 1
+        self._tiles_left = N_ROWS_AND_COLS * N_ROWS_AND_COLS - 1
 
     @property
     def can_play(self):
@@ -255,14 +254,14 @@ class Halali:
     def available_moves(self, location, for_enemy=False):
         x, y = location
         # horizontal:
-        for target_x in range(N_COLS):
+        for target_x in range(N_ROWS_AND_COLS):
             try:
                 self.validate_move(x, y, target_x, y, for_enemy=for_enemy)
                 yield target_x, y
             except InvalidMove:
                 pass
         # vertical:
-        for target_y in range(N_ROWS):
+        for target_y in range(N_ROWS_AND_COLS):
             try:
                 self.validate_move(x, y, x, target_y, for_enemy=for_enemy)
                 yield x, target_y
@@ -306,7 +305,7 @@ class SPHalali(Halali):
         # if it's not our turn, try to make a move
         if not self.can_play:
             possible_moves = []
-            for source in product(range(N_ROWS), repeat=2):
+            for source in product(range(N_ROWS_AND_COLS), repeat=2):
                 source_x, source_y = source
                 card = self.cards[source_x][source_y]
                 if not card:
