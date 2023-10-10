@@ -604,6 +604,7 @@ class SetupView(arcade.View):
                     text = label
                     def on_click(event):
                         self._stack = []
+                        self.manager.disable()
                         game_view = GameView(build_settings(self.settings))
                         game_view.setup()
                         self.window.show_view(game_view)
