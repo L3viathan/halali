@@ -2,7 +2,7 @@ import random
 import queue
 from threading import Thread
 from time import monotonic
-from itertools import product
+from itertools import product, groupby
 
 import arcade
 
@@ -327,8 +327,9 @@ class SPHalali(Halali):
                             possible_moves.append(("move", source, target, 1))
             if possible_moves:
                 possible_moves.sort(key=lambda m: -m[-1])
-                # print("Moves found:", len(possible_moves), possible_moves)
-                move = possible_moves[0]
+                good_moves = list(next(groupby(possible_moves, lambda x: x[-1]))[1])
+                random.shuffle(good_moves)
+                move = good_moves[0]
                 match move:
                     case ["move", source, target, *_]:
                         try:
