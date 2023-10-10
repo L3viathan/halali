@@ -14,6 +14,7 @@ from .game import (
     GameOver,
     N_ROWS_AND_COLS,
 )
+from .settings import Settings
 
 SCREEN_MARGIN = 100
 
@@ -173,7 +174,7 @@ class GameView(arcade.View):
             case other:
                 raise RuntimeError(f"Unknown game mode {mode}")
 
-        if self.settings["settings"]["music"]:
+        if self.settings["music"]:
             self.bgmusic = arcade.play_sound(
                 arcade.load_sound(path("resources/nature-walk-124997.wav")),
                 looping=True,
@@ -325,7 +326,7 @@ class GameView(arcade.View):
         self.camera_game.use()
         self.place_list.draw()
         self.card_list.draw()
-        if self.settings["settings"]["indicators"]:
+        if self.settings["indicators"]:
             self.indicator_list.draw()
         if self.held_card:
             self.held_card.draw()
@@ -396,7 +397,7 @@ class GameView(arcade.View):
             self.held_card = cards[-1]
             self.held_card.hold()
             self.card_list.remove(self.held_card)
-            if self.settings["settings"]["indicators"]:
+            if self.settings["indicators"]:
                 for x, y in self.game.available_moves(
                     location_from_position(card.position),
                 ):
@@ -537,31 +538,34 @@ class SetupView(arcade.View):
         self.texture = arcade.load_texture(path("resources/gameover.png"))
         self.manager = arcade.gui.UIManager()
         self.manager.enable()
-        self.settings = [
-            {"label": "Play", "type": "play", "mode": "singleplayer"},
-            {"label": "Multiplayer", "type": "menu", "content": [
-                    {"label": "Hot-Seat", "type": "play", "mode": "hotseat"},
-                    {"label": "Host", "type": "play", "mode": "host"},
-                    {"label": "Join", "type": "play", "mode": "join"},
-                ]
+        self.settings = Settings()
+        self.menu = [
+            {"label": "Play", "play": "singleplayer"},
+            {"label": "Multiplayer", "menu": [
+                    {"label": "Hot-Seat", "play": "hotseat"},
+                    {"label": "Host", "play": "host"},
+                    {"label": "Join", "play": "join"},
+                ],
             },
-            {"label": "Settings", "type": "menu", "content": [
-                {"label": "Indicators", "type": "bool", "value": False},
-                {"label": "Music", "type": "bool", "value": False},
-                {"label": "Sounds", "type": "bool", "value": True},
-            ]},
+            {"label": "Settings", "menu": [
+                    {"label": "Indicators", "setting": "indicators"},
+                    {"label": "Sound", "setting": "sound"},
+                    {"label": "Music", "setting": "music"},
+                ],
+            },
         ]
-        self._stack = []
-        self.show_settings()
 
-    def show_settings(self):
+        self._stack = []
+        self.show_menu()
+
+    def show_menu(self):
         self.manager.clear()
 
         self.v_box = arcade.gui.UIBoxLayout()
 
-        elements = self.settings
+        elements = self.menu
         for part in self._stack:
-            elements = elements[part]["content"]
+            elements = elements[part]["menu"]
 
         if self._stack:
             back_button = arcade.gui.UIFlatButton(text="Back", width=200)
@@ -570,42 +574,31 @@ class SetupView(arcade.View):
             @back_button.event("on_click")
             def on_click_back(event):
                 self._stack.pop()
-                self.show_settings()
+                self.show_menu()
 
         for i, element in enumerate(elements):
-            button = arcade.gui.UIFlatButton(text="", width=200)
             label = element["label"]
-            match element["type"]:
-                case "bool":
-                    text = f"{label.title()}: { {True: 'on', False: 'off'}[element['value']]}"
-                    def on_click(event, label=label, button=button, element=element):
-                        element["value"] = not element["value"]
-                        button.text = f"{label.title()}: { {True: 'on', False: 'off'}[element['value']]}"
-
-                case "choice":
-                    text = f"{label.title()}: {element['choices'][0]}"
-                    def on_click(event, label=label, button=button, element=element):
-                        element["choices"].append(element["choices"].pop(0))
-                        button.text = f"{label.title()}: {element['choices'][0]}"
-
-                case "menu":
-                    text = label
-                    def on_click(event, i=i):
-                        self._stack.append(i)
-                        self.show_settings()
-
-                case "play":
-                    text = label
-                    def on_click(event, mode=element["mode"]):
+            button = arcade.gui.UIFlatButton(text=label, width=200)
+            match element:
+                case {"play": mode}:
+                    def on_click(event, mode=mode):
                         self._stack = []
                         self.manager.disable()
-                        game_view = GameView(mode, build_settings(self.settings))
+                        game_view = GameView(mode, self.settings.dump())
                         self.window.show_view(game_view)
-
+                case {"menu": parts}:
+                    def on_click(event, i=i):
+                        self._stack.append(i)
+                        self.show_menu()
+                case {"setting": name}:
+                    button.text = f"{label}: {self.settings.label(name)}"
+                    def on_click(event, button=button, name=name, label=label):
+                        self.settings.click(name)
+                        button.text = f"{label}: {self.settings.label(name)}"
+                    # could add more events here
                 case other:
                     raise RuntimeError(f"Unknown element {other}")
 
-            button.text = text
             self.v_box.add(button.with_space_around(bottom=20))
             button.event("on_click")(on_click)
 
