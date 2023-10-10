@@ -599,8 +599,8 @@ class SetupView(arcade.View):
                 case "choice":
                     text = f"{label.title()}: {element['choices'][0]}"
                     def on_click(event, label=label, button=button, element=element):
-                        element["value"].append(element["value"].pop(0))
-                        button.text = f"{label.title()}: { {True: 'on', False: 'off'}[element['value']]}"
+                        element["choices"].append(element["choices"].pop(0))
+                        button.text = f"{label.title()}: {element['choices'][0]}"
 
                 case "menu":
                     text = label
