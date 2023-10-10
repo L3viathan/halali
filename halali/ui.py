@@ -155,21 +155,79 @@ class Card(arcade.Sprite):
 
 
 class GameView(arcade.View):
-    def __init__(self, settings):
+    def __init__(self, mode, settings):
         super().__init__()
 
-        self.place_list = None
-        self.card_list = None
-        self.indicator_list = None
         self.held_card = None
-        self.game = None
-        self.animal_score = None
-        self.human_score = None
-        self.turn_counter = None
         self.camera_game = arcade.Camera(SCREEN_WIDTH, SCREEN_HEIGHT)
         self.camera_hud = arcade.Camera(SCREEN_WIDTH, SCREEN_HEIGHT)
         self.settings = settings
         self._exits_added = False
+        match mode:
+            case "hotseat":
+                self.game = Halali()
+            case "singleplayer":
+                self.game = SPHalali()
+            case "host":
+                self.game = MPServerHalali()
+            case "join":
+                self.game = MPClientHalali()
+            case other:
+                raise RuntimeError(f"Unknown game mode {mode}")
+
+        if self.settings["settings"]["music"]:
+            self.bgmusic = arcade.play_sound(
+                arcade.load_sound(path("resources/nature-walk-124997.wav")),
+                looping=True,
+            )
+        else:
+            self.bgmusic = None
+
+        arcade.set_background_color(arcade.color.AMAZON)
+
+        self.place_list = arcade.SpriteList()
+        for x in range(N_COLS):
+            for y in range(N_ROWS):
+                place = arcade.SpriteSolidColor(
+                    CARD_WIDTH - 20,
+                    CARD_HEIGHT - 20,
+                    arcade.csscolor.DARK_OLIVE_GREEN,
+                )
+                place.is_exit = False
+                place.position = position_from_location((x, y))
+                self.place_list.append(place)
+
+        self.card_list = arcade.SpriteList()
+        self.indicator_list = arcade.SpriteList()
+        self.sync_cards()
+
+        self.animal_score = arcade.Text(
+            "0",
+            start_x=TEXT_MARGIN,
+            start_y=TEXT_MARGIN,
+            anchor_x="center",
+            anchor_y="center",
+            font_size=36,
+            color=(220, 220, 220),
+        )
+        self.human_score = arcade.Text(
+            "0",
+            start_x=SCREEN_WIDTH - TEXT_MARGIN,
+            start_y=TEXT_MARGIN,
+            anchor_x="center",
+            anchor_y="center",
+            font_size=36,
+            color=(220, 220, 220),
+        )
+        self.turn_counter = arcade.Text(
+            "5 turns left",
+            start_x=SCREEN_WIDTH//2,
+            start_y=SCREEN_HEIGHT - TEXT_MARGIN * 0.75,
+            anchor_x="center",
+            anchor_y="center",
+            font_size=36,
+            color=(220, 220, 220),
+        )
 
     def reveal(self, location_or_card):
         if isinstance(location_or_card, Card):
@@ -218,73 +276,6 @@ class GameView(arcade.View):
             if self.game.to_play == "humans":
                 return COLOR_HUMANS
         return COLOR_NEUTRAL
-
-    def setup(self):
-        if self.settings["mode"] == "Hot-Seat":
-            self.game = Halali()
-        elif self.settings["mode"] == "Singleplayer":
-            self.game = SPHalali()
-        elif self.settings["mode"] == "Host":
-            self.game = MPServerHalali()
-        elif self.settings["mode"] == "Join":
-            self.game = MPClientHalali()
-
-        if self.settings["settings"]["music"]:
-            self.bgmusic = arcade.play_sound(
-                arcade.load_sound(path("resources/nature-walk-124997.wav")),
-                looping=True,
-            )
-        else:
-            self.bgmusic = None
-
-
-        arcade.set_background_color(arcade.color.AMAZON)
-
-        self.place_list = arcade.SpriteList()
-        for x in range(N_COLS):
-            for y in range(N_ROWS):
-                place = arcade.SpriteSolidColor(
-                    CARD_WIDTH - 20,
-                    CARD_HEIGHT - 20,
-                    arcade.csscolor.DARK_OLIVE_GREEN,
-                )
-                place.is_exit = False
-                place.position = position_from_location((x, y))
-                self.place_list.append(place)
-
-        self.card_list = arcade.SpriteList()
-        self.indicator_list = arcade.SpriteList()
-        self.sync_cards()
-
-        self.held_card = None
-
-        self.animal_score = arcade.Text(
-            "0",
-            start_x=TEXT_MARGIN,
-            start_y=TEXT_MARGIN,
-            anchor_x="center",
-            anchor_y="center",
-            font_size=36,
-            color=(220, 220, 220),
-        )
-        self.human_score = arcade.Text(
-            "0",
-            start_x=SCREEN_WIDTH - TEXT_MARGIN,
-            start_y=TEXT_MARGIN,
-            anchor_x="center",
-            anchor_y="center",
-            font_size=36,
-            color=(220, 220, 220),
-        )
-        self.turn_counter = arcade.Text(
-            "5 turns left",
-            start_x=SCREEN_WIDTH//2,
-            start_y=SCREEN_HEIGHT - TEXT_MARGIN * 0.75,
-            anchor_x="center",
-            anchor_y="center",
-            font_size=36,
-            color=(220, 220, 220),
-        )
 
     def sync_cards(self):
         self.card_list.clear()
@@ -474,7 +465,6 @@ class GameView(arcade.View):
                 if self.bgmusic:
                     arcade.stop_sound(self.bgmusic)
                 game_over_view = GameOverView(self.game.points)
-                game_over_view.setup()
                 self.window.show_view(game_over_view)
 
 
@@ -488,8 +478,6 @@ class GameOverView(arcade.View):
             if self.points["animals"] > self.points["humans"]
             else "Humans"
         )
-
-    def setup(self):
         arcade.set_background_color(arcade.color.BLACK)
         self.heading = arcade.Text(
             "Game over",
@@ -534,7 +522,7 @@ def build_settings(structure):
         match part["type"]:
             case "menu":
                 settings[label] = build_settings(part["content"])
-            case "view":
+            case "play":
                 continue
             case "bool":
                 settings[label] = part["value"]
@@ -552,13 +540,13 @@ class SetupView(arcade.View):
         self.manager = arcade.gui.UIManager()
         self.manager.enable()
         self.settings = [
-            {"label": "Play", "type": "view", "view": GameView},
-            {"label": "Mode", "type": "choice", "choices": [
-                "Singleplayer",
-                "Hot-Seat",
-                "Join",
-                "Host",
-            ]},
+            {"label": "Play", "type": "play", "mode": "singleplayer"},
+            {"label": "Multiplayer", "type": "menu", "content": [
+                    {"label": "Hot-Seat", "type": "play", "mode": "hotseat"},
+                    {"label": "Host", "type": "play", "mode": "host"},
+                    {"label": "Join", "type": "play", "mode": "join"},
+                ]
+            },
             {"label": "Settings", "type": "menu", "content": [
                 {"label": "Indicators", "type": "bool", "value": False},
                 {"label": "Music", "type": "bool", "value": False},
@@ -608,14 +596,16 @@ class SetupView(arcade.View):
                         self._stack.append(i)
                         self.show_settings()
 
-                case "view":
+                case "play":
                     text = label
-                    def on_click(event):
+                    def on_click(event, mode=element["mode"]):
                         self._stack = []
                         self.manager.disable()
-                        game_view = GameView(build_settings(self.settings))
-                        game_view.setup()
+                        game_view = GameView(mode, build_settings(self.settings))
                         self.window.show_view(game_view)
+
+                case other:
+                    raise RuntimeError(f"Unknown element {other}")
 
             button.text = text
             self.v_box.add(button.with_space_around(bottom=20))
