@@ -6,6 +6,7 @@ from pyglet.math import Vec2
 
 from .game import (
     Halali,
+    SPHalali,
     MPServerHalali,
     MPClientHalali,
     MOVABLE_FOR,
@@ -221,6 +222,8 @@ class GameView(arcade.View):
     def setup(self):
         if self.settings["mode"] == "Hot-Seat":
             self.game = Halali()
+        elif self.settings["mode"] == "Singleplayer":
+            self.game = SPHalali()
         elif self.settings["mode"] == "Host":
             self.game = MPServerHalali()
         elif self.settings["mode"] == "Join":
@@ -550,10 +553,15 @@ class SetupView(arcade.View):
         self.manager.enable()
         self.settings = [
             {"label": "Play", "type": "view", "view": GameView},
-            {"label": "Mode", "type": "choice", "choices": ["Hot-Seat", "Join", "Host"]},
+            {"label": "Mode", "type": "choice", "choices": [
+                "Singleplayer",
+                "Hot-Seat",
+                "Join",
+                "Host",
+            ]},
             {"label": "Settings", "type": "menu", "content": [
                 {"label": "Indicators", "type": "bool", "value": False},
-                {"label": "Music", "type": "bool", "value": True},
+                {"label": "Music", "type": "bool", "value": False},
                 {"label": "Sounds", "type": "bool", "value": True},
             ]},
         ]

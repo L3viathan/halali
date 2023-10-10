@@ -2,6 +2,7 @@ import random
 import queue
 from threading import Thread
 from time import monotonic
+from itertools import product
 
 import arcade
 
@@ -181,11 +182,16 @@ class Halali:
         self._swap_teams()
         return True
 
-    def validate_move(self, card_x, card_y, target_x, target_y):
+    def validate_move(self, card_x, card_y, target_x, target_y, for_enemy=False):
         if card_x == target_x and card_y == target_y:
             raise InvalidMove("Didn't move")
         if card_x != target_x and card_y != target_y:
             raise InvalidMove("Can't move diagonally")
+        if for_enemy:
+            team = {"humans": "animals", "animals": "humans"}[self.team]
+        else:
+            team = self.team
+
         moving = None
         if card_x != target_x:
             # moving horizontally
@@ -207,10 +213,17 @@ class Halali:
                 moving = "down"
             else:
                 moving = "up"
-
         card = self.cards[card_x][card_y]
         if not card:
             raise InvalidMove("Can't move empty tile")
+        if CARD_TYPES[card["kind"]].get("slow") and (bigger - smaller) > 1:
+            raise InvalidMove(f"{card['kind']} can only move one tile")
+        if CARD_TYPES[card["kind"]].get("immovable"):
+            raise InvalidMove(f"{card['kind']} can't move")
+        if card["kind"] not in MOVABLE_FOR[team]:
+            raise InvalidMove(f"Team {team} can't move {card['kind']}")
+        if card["facing"] != "up":
+            raise InvalidMove("Can't move face-down card.")
         target = self.cards[target_x][target_y]
         if target:
             if target["facing"] != "up":
@@ -225,7 +238,13 @@ class Halali:
         self.check_can_play(for_enemy=for_enemy)
         card_x, card_y = card_loc
         target_x, target_y = target_loc
-        self.validate_move(card_x, card_y, target_x, target_y)
+        self.validate_move(
+            card_x,
+            card_y,
+            target_x,
+            target_y,
+            for_enemy=for_enemy,
+        )
         if target := self.cards[target_x][target_y]:
             self.points[self.to_play] += CARD_TYPES[target["kind"]]["points"]
         self.cards[target_x][target_y] = self.cards[card_x][card_y]
@@ -233,19 +252,19 @@ class Halali:
         self._swap_teams()
         return True
 
-    def available_moves(self, location):
+    def available_moves(self, location, for_enemy=False):
         x, y = location
         # horizontal:
         for target_x in range(N_COLS):
             try:
-                self.validate_move(x, y, target_x, y)
+                self.validate_move(x, y, target_x, y, for_enemy=for_enemy)
                 yield target_x, y
             except InvalidMove:
                 pass
         # vertical:
         for target_y in range(N_ROWS):
             try:
-                self.validate_move(x, y, x, target_y)
+                self.validate_move(x, y, x, target_y, for_enemy=for_enemy)
                 yield x, target_y
             except InvalidMove:
                 pass
@@ -275,6 +294,55 @@ class NetworkedHalali(Halali):
         if not for_enemy:
             self.send_queue.put(["rescue", location])
         return True
+
+
+class SPHalali(Halali):
+    def __init__(self):
+        super().__init__()
+        self.team = random.choice(["animals", "humans"])
+
+    def update(self, view):
+        super().update(view)
+        # if it's not our turn, try to make a move
+        if not self.can_play:
+            possible_moves = []
+            for source in product(range(N_ROWS), repeat=2):
+                source_x, source_y = source
+                card = self.cards[source_x][source_y]
+                if not card:
+                    continue
+                if card["kind"] not in MOVABLE_FOR[
+                    {"animals": "humans", "humans": "animals"}[self.team]
+                ]:
+                    continue
+                if card["facing"] == "down":
+                    possible_moves.append(("reveal", source, 0))
+                else:
+                    for target in self.available_moves(source, for_enemy=True):
+                        target_x, target_y = target
+                        target_card = self.cards[target_x][target_y]
+                        if target_card:
+                            possible_moves.append(("move", source, target, 2))
+                        else:
+                            possible_moves.append(("move", source, target, 1))
+            if possible_moves:
+                possible_moves.sort(key=lambda m: -m[-1])
+                # print("Moves found:", len(possible_moves), possible_moves)
+                move = possible_moves[0]
+                match move:
+                    case ["move", source, target, *_]:
+                        try:
+                            self.attempt_move(source, target, for_enemy=True)
+                            view.move(source, target)
+                        except InvalidMove as e:
+                            print(f"Rejecting {target} to {target} because {e.args[0]}")
+                    case ["reveal", source, *_]:
+                        self.attempt_reveal(source, for_enemy=True)
+                        view.reveal(source)
+                    case other:
+                        print("Wat", other)
+            else:
+                print("Can't find move")
 
 
 class MPServerHalali(NetworkedHalali):
