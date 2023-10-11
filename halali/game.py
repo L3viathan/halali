@@ -311,12 +311,12 @@ class SPHalali(Halali):
                 card = self.cards[source_x][source_y]
                 if not card:
                     continue
-                if card["kind"] not in MOVABLE_FOR[
+                if card["facing"] == "down":
+                    possible_moves.append(("reveal", source, 0))
+                elif card["kind"] not in MOVABLE_FOR[
                     {"animals": "humans", "humans": "animals"}[self.team]
                 ]:
                     continue
-                if card["facing"] == "down":
-                    possible_moves.append(("reveal", source, 0))
                 else:
                     for target in self.available_moves(source, for_enemy=True):
                         target_x, target_y = target

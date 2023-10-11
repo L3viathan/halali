@@ -56,6 +56,15 @@ BOTTOM_Y = MAT_HEIGHT / 2 + MAT_HEIGHT * VERTICAL_MARGIN_PERCENT
 # The X of where to start putting things on the left side
 START_X = MAT_WIDTH / 2 + MAT_WIDTH * HORIZONTAL_MARGIN_PERCENT
 
+
+def round_position(position):
+    x, y = position
+    nearest = CARD_SIZE // 2
+    return (
+        nearest * round(x / nearest),
+        nearest * round(y / nearest),
+    )
+
 def path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
@@ -156,7 +165,7 @@ class Card(arcade.Sprite):
     def hold(self):
         # sometimes non-integer positions can happen, probably when the update
         # fires concurrently with the mouse_move event. Therefore: rounding.
-        self.orig_position = tuple(map(round, self.position))
+        self.orig_position = round_position(self.position)
         self.being_held = True
 
     def release(self):
