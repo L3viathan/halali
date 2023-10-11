@@ -1,5 +1,7 @@
 import sys
 import os
+from itertools import count
+
 import arcade
 import arcade.gui
 from pyglet.math import Vec2
@@ -23,9 +25,16 @@ TEXT_MARGIN = 50
 COLOR_ANIMALS = arcade.color.AZURE
 COLOR_HUMANS = arcade.color.CARROT_ORANGE
 COLOR_NEUTRAL = (170, 170, 110)
+COLOR_TEXT = (220, 220, 220)
+COLOR_INDICATOR = (138, 43, 226)
+DEBUG_MARGIN_TOP = 20
+DEBUG_MARGIN_LEFT = 10
+DEBUG_DISTANCE = 15
+DEBUG_FONT_SIZE = 10
 
 # How big are the cards?
 CARD_SIZE = 100
+PLACE_SIZE = CARD_SIZE - 20
 
 SCREEN_WIDTH = N_ROWS_AND_COLS * CARD_SIZE + 2 * SCREEN_MARGIN
 SCREEN_HEIGHT = N_ROWS_AND_COLS * CARD_SIZE + 2 * SCREEN_MARGIN
@@ -102,6 +111,9 @@ class Card(arcade.Sprite):
         if card_info["facing"] == "up":
             self.turn_over()
 
+    def __repr__(self):
+        return f"<{self.kind} O:{self.orig_position} F:{self.facing}>"
+
     def ease_position(
         self,
         new_position,
@@ -124,6 +136,9 @@ class Card(arcade.Sprite):
     def on_update(self, delta_time):
         for prop, easing in self._easings[:]:
             done, new_val = arcade.ease_update(easing, delta_time)
+            if done:
+                self._easings.remove((prop, easing))
+                new_val = easing.end_value
             match prop:
                 case "x":
                     self.position = (new_val, self.position[1])
@@ -131,8 +146,6 @@ class Card(arcade.Sprite):
                     self.position = (self.position[0], new_val)
                 case other:
                     setattr(self, f"_{other}", new_val)
-            if done:
-                self._easings.remove((prop, easing))
 
     @property
     def game_position(self):
@@ -141,7 +154,9 @@ class Card(arcade.Sprite):
         return self.position
 
     def hold(self):
-        self.orig_position = self.position
+        # sometimes non-integer positions can happen, probably when the update
+        # fires concurrently with the mouse_move event. Therefore: rounding.
+        self.orig_position = tuple(map(round, self.position))
         self.being_held = True
 
     def release(self):
@@ -162,6 +177,10 @@ class GameView(arcade.View):
         self.camera_hud = arcade.Camera(SCREEN_WIDTH, SCREEN_HEIGHT)
         self.settings = settings
         self._exits_added = False
+        self.debug = False
+        self.debug_info = {
+            "mode": mode,
+        }
         match mode:
             case "hotseat":
                 self.game = Halali()
@@ -172,7 +191,7 @@ class GameView(arcade.View):
             case "join":
                 self.game = MPClientHalali()
             case other:
-                raise RuntimeError(f"Unknown game mode {mode}")
+                raise RuntimeError(f"Unknown game mode {other}")
 
         if self.settings["music"]:
             self.bgmusic = arcade.play_sound(
@@ -188,8 +207,8 @@ class GameView(arcade.View):
         for x in range(N_ROWS_AND_COLS):
             for y in range(N_ROWS_AND_COLS):
                 place = arcade.SpriteSolidColor(
-                    CARD_SIZE - 20,
-                    CARD_SIZE - 20,
+                    PLACE_SIZE,
+                    PLACE_SIZE,
                     arcade.csscolor.DARK_OLIVE_GREEN,
                 )
                 place.is_exit = False
@@ -207,7 +226,7 @@ class GameView(arcade.View):
             anchor_x="center",
             anchor_y="center",
             font_size=36,
-            color=(220, 220, 220),
+            color=COLOR_TEXT,
         )
         self.human_score = arcade.Text(
             "0",
@@ -216,7 +235,7 @@ class GameView(arcade.View):
             anchor_x="center",
             anchor_y="center",
             font_size=36,
-            color=(220, 220, 220),
+            color=COLOR_TEXT,
         )
         self.turn_counter = arcade.Text(
             "5 turns left",
@@ -225,7 +244,7 @@ class GameView(arcade.View):
             anchor_x="center",
             anchor_y="center",
             font_size=36,
-            color=(220, 220, 220),
+            color=COLOR_TEXT,
         )
 
     def reveal(self, location_or_card):
@@ -286,11 +305,14 @@ class GameView(arcade.View):
                 card.position = position_from_location((x, y))
                 self.card_list.append(card)
 
-    def on_mouse_scroll(self, *_, **__):
-        # DEBUG
-        print("Syncing..")
-        self.sync_cards()
-
+    def on_key_press(self, key, modifiers):
+        if key == arcade.key.F2:
+            self.debug = not self.debug
+        elif key == arcade.key.F5:
+            print("Syncing..")
+            self.sync_cards()
+        elif key == arcade.key.F8:
+            self.debug_info["breakpoint"] = True
 
     def add_exits(self):
         self._exits_added = True
@@ -332,6 +354,42 @@ class GameView(arcade.View):
             self.held_card.draw()
         self.camera_hud.use()
         self.draw_hud()
+        if self.debug:
+            self.draw_debug_info()
+
+    def draw_debug_info(self):
+        c = count()
+        arcade.draw_text(
+            f"M: {self.debug_info['mode']}",
+            DEBUG_MARGIN_LEFT,
+            SCREEN_HEIGHT - (DEBUG_MARGIN_TOP + next(c) * DEBUG_DISTANCE),
+            COLOR_TEXT,
+            DEBUG_FONT_SIZE,
+            align="left",
+        )
+        arcade.draw_text(
+            f"H: {self.held_card!r}",
+            DEBUG_MARGIN_LEFT,
+            SCREEN_HEIGHT - (DEBUG_MARGIN_TOP + next(c) * DEBUG_DISTANCE),
+            COLOR_TEXT,
+            DEBUG_FONT_SIZE,
+            align="left",
+        )
+        if pos := self.debug_info.get("mouse_pos"):
+            cards = list(arcade.get_sprites_at_point(pos, self.card_list))
+            if cards:
+                arcade.draw_text(
+                    f"C: {cards[0]!r}",
+                    DEBUG_MARGIN_LEFT,
+                    SCREEN_HEIGHT - (DEBUG_MARGIN_TOP + next(c) * DEBUG_DISTANCE),
+                    COLOR_TEXT,
+                    DEBUG_FONT_SIZE,
+                    align="left",
+                )
+        if self.debug_info.pop("breakpoint", None):
+            breakpoint()
+            ...
+
 
     def draw_hud(self):
         arcade.draw_rectangle_outline(
@@ -404,12 +462,14 @@ class GameView(arcade.View):
                     indicator = arcade.SpriteSolidColor(
                         CARD_SIZE // 8,
                         CARD_SIZE // 8,
-                        (138, 43, 226),
+                        COLOR_INDICATOR,
                     )
                     indicator.position = position_from_location((x, y))
                     self.indicator_list.append(indicator)
 
     def on_mouse_motion(self, x, y, dx, dy):
+        if self.debug:
+            self.debug_info["mouse_pos"] = x, y
         if self.held_card:
             self.held_card.center_x += dx
             self.held_card.center_y += dy
@@ -485,7 +545,7 @@ class GameOverView(arcade.View):
             anchor_x="center",
             anchor_y="center",
             font_size=48,
-            color=(220, 220, 220),
+            color=COLOR_TEXT,
         )
         self.result = arcade.Text(
             f"{self.winner} won! ({self.points['humans']}:{self.points['animals']})",
@@ -494,7 +554,7 @@ class GameOverView(arcade.View):
             anchor_x="center",
             anchor_y="center",
             font_size=32,
-            color=(220, 220, 220),
+            color=COLOR_TEXT,
         )
 
     def on_draw(self):
@@ -586,13 +646,13 @@ class SetupView(arcade.View):
                         self.manager.disable()
                         game_view = GameView(mode, self.settings.dump())
                         self.window.show_view(game_view)
-                case {"menu": parts}:
-                    def on_click(event, i=i):
+                case {"menu": _}:
+                    def on_click(event, i=i):  # noqa
                         self._stack.append(i)
                         self.show_menu()
                 case {"setting": name}:
                     button.text = f"{label}: {self.settings.label(name)}"
-                    def on_click(event, button=button, name=name, label=label):
+                    def on_click(event, button=button, name=name, label=label):  # noqa
                         self.settings.click(name)
                         button.text = f"{label}: {self.settings.label(name)}"
                     # could add more events here

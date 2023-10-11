@@ -7,6 +7,7 @@ from itertools import product, groupby
 import arcade
 
 from .networking import server, client
+from . import __version__
 
 N_ROWS_AND_COLS = 7
 TEAMS = ["humans", "animals"]
@@ -337,8 +338,11 @@ class SPHalali(Halali):
                         except InvalidMove as e:
                             print(f"Rejecting {target} to {target} because {e.args[0]}")
                     case ["reveal", source, *_]:
-                        self.attempt_reveal(source, for_enemy=True)
-                        view.reveal(source)
+                        try:
+                            self.attempt_reveal(source, for_enemy=True)
+                            view.reveal(source)
+                        except InvalidMove as e:
+                            print(f"Rejecting {source} because {e.args[0]}")
                     case other:
                         print("Wat", other)
             else:
@@ -374,6 +378,7 @@ class MPServerHalali(NetworkedHalali):
                         "to_play": self.to_play,
                         "client_team": ("animals"if self.team == "humans"else "humans"),
                         "points": self.points,
+                        "version": __version__,
                     },
                 ]
             case ["disconnected"]:
@@ -449,6 +454,8 @@ class MPClientHalali(NetworkedHalali):
         print("Qstat:", self.send_queue.qsize(), self.recv_queue.qsize())
         match message:
             case ["status", status]:
+                if __version__ != status["version"]:
+                    raise RuntimeError("Version mismatch!")
                 self.to_play = status["to_play"]
                 self.team = status["client_team"]
                 self.points = status["points"]

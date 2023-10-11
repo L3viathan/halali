@@ -1,6 +1,9 @@
+from importlib.metadata import version
 import arcade
 
 from .ui import SetupView, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE
+
+__version__ = version("halali")
 
 def main():
     window = arcade.Window(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE)
