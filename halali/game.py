@@ -149,14 +149,44 @@ class Halali:
             if not self.can_play:
                 raise InvalidMove("Not your turn!")
 
-    def attempt_rescue(self, location, for_enemy=False):
-        self.check_can_play(for_enemy=for_enemy)
-        x, y = location
-        card = self.cards[x][y]
+    def validate_rescue(self, card_x, card_y, for_enemy=False):
+        card = self.cards[card_x][card_y]
         if not card:
             raise InvalidMove("Trying to move empty tile")
         if CARD_TYPES[card["kind"]].get("team") != self.to_play:
             raise InvalidMove("Can't rescue neutral pieces")
+        rescue_possibilities = [
+            (0, N_ROWS_AND_COLS // 2, "y"),
+            (N_ROWS_AND_COLS // 2, 0, "x"),
+            (N_ROWS_AND_COLS - 1, N_ROWS_AND_COLS // 2, "y"),
+            (N_ROWS_AND_COLS // 2, N_ROWS_AND_COLS - 1, "x"),
+        ]
+        for target_x, target_y, direction in rescue_possibilities:
+            if (target_x, target_y) == (card_x, card_y):
+                return True
+            try:
+                self.validate_move(
+                    card_x,
+                    card_y,
+                    target_x,
+                    target_y,
+                    for_enemy=for_enemy,
+                )
+                if card_x == target_x and direction == "x":
+                    return True
+                elif card_y == target_y and direction == "y":
+                    return True
+                else:
+                    continue  # direction mismatch
+            except InvalidMove:
+                continue
+        raise InvalidMove("Can't escape from this place")
+
+    def attempt_rescue(self, location, for_enemy=False):
+        self.check_can_play(for_enemy=for_enemy)
+        x, y = location
+        card = self.cards[x][y]
+        self.validate_rescue(x, y, for_enemy=for_enemy)
         self.cards[x][y] = None
         self.points[self.to_play] += CARD_TYPES[card["kind"]]["points"]
         self._swap_teams()
@@ -173,13 +203,18 @@ class Halali:
         self.check_can_play(for_enemy=for_enemy)
         x, y = location
         card = self.cards[x][y]
+        self.validate_reveal(x, y, for_enemy=for_enemy)
+        self._tiles_left -= 1
+        card["facing"] = "up"
+        self._swap_teams()
+        return True
+
+    def validate_reveal(self, card_x, card_y, for_enemy=False):
+        card = self.cards[card_x][card_y]
         if not card:
             raise InvalidMove("Can't reveal empty spot")
         if card["facing"] == "up":
             raise InvalidMove("Can't reveal face-up card")
-        self._tiles_left -= 1
-        card["facing"] = "up"
-        self._swap_teams()
         return True
 
     def validate_move(self, card_x, card_y, target_x, target_y, for_enemy=False):
@@ -325,6 +360,12 @@ class SPHalali(Halali):
                             possible_moves.append(("move", source, target, 2))
                         else:
                             possible_moves.append(("move", source, target, 1))
+                    if self.turns_left is not None:
+                        try:
+                            self.validate_rescue(source_x, source_y, for_enemy=True)
+                            possible_moves.append(("rescue", source, 3))
+                        except InvalidMove:
+                            pass
             if possible_moves:
                 possible_moves.sort(key=lambda m: -m[-1])
                 good_moves = list(next(groupby(possible_moves, lambda x: x[-1]))[1])
@@ -341,6 +382,12 @@ class SPHalali(Halali):
                         try:
                             self.attempt_reveal(source, for_enemy=True)
                             view.reveal(source)
+                        except InvalidMove as e:
+                            print(f"Rejecting {source} because {e.args[0]}")
+                    case ["rescue", source, *_]:
+                        try:
+                            self.attempt_rescue(source, for_enemy=True)
+                            view.rescue(source)
                         except InvalidMove as e:
                             print(f"Rejecting {source} because {e.args[0]}")
                     case other:
