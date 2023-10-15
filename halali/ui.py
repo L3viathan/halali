@@ -1,9 +1,11 @@
 import sys
 import os
 from itertools import count
+from functools import partial
 
 import arcade
 import arcade.gui
+import pyglet
 from pyglet.math import Vec2
 
 from .game import (
@@ -91,6 +93,10 @@ def position_from_location(location):
     )
 
 
+class Then:
+    def __init__(self, then):
+        self.then = then
+
 
 class Card(arcade.Sprite):
     def __init__(self, card_info):
@@ -123,38 +129,46 @@ class Card(arcade.Sprite):
     def __repr__(self):
         return f"<{self.kind} O:{self.orig_position} F:{self.facing}>"
 
-    def ease_position(
-        self,
-        new_position,
-        time=0.5,
-        easefn=arcade.ease_out_elastic,
-        dynamic_time=True,
-    ):
-        if dynamic_time:
-            dist = arcade.get_distance(*self.position, *new_position)
-            time *= max(1.5, (dist / CARD_SIZE))
-        ex, ey = arcade.ease_position(
-            self.position,
-            new_position,
-            time=time,
-            ease_function=easefn,
+    def animate(self, attribute, final_value=None, duration=0, delay=0, _delay=0, ease="linear"):
+        # returns a partial of itself, with a delay set equal to the delay + duration
+        delay = delay + _delay
+        pyglet.clock.schedule_once(
+            self.animate_now,
+            delay,
+            attribute=attribute,
+            duration=duration,
+            final_value=final_value,
+            ease=ease,
         )
-        self._easings.append(("x", ex))
-        self._easings.append(("y", ey))
+        return Then(partial(self.animate, _delay=delay + duration))
+
+    def animate_now(self, _dt, attribute, final_value, duration, ease="linear"):
+        # start easing, also schedule a simple setter at the end?
+        # TODO: also support callables as "attribute", in which case we just
+        # call that callable and do nothing else.
+        if isinstance(attribute, str):
+            if not final_value or not duration:
+                raise ValueError("animate() missing final_value or duration")
+            start_value = getattr(self, attribute)
+            print("starting animation of", attribute, "from", start_value, "to", final_value)
+            easing = arcade.ease_value(
+                start_value,
+                final_value,
+                time=duration,
+                ease_function=getattr(arcade, ease),
+            )
+            self._easings.append((attribute, easing))
+        else:
+            attribute()
 
     def on_update(self, delta_time):
-        for prop, easing in self._easings[:]:
+        n_easings = len(self._easings)
+        for i, (attr, easing) in enumerate(reversed(self._easings)):
             done, new_val = arcade.ease_update(easing, delta_time)
             if done:
-                self._easings.remove((prop, easing))
+                self._easings.pop(n_easings - i - 1)
                 new_val = easing.end_value
-            match prop:
-                case "x":
-                    self.position = (new_val, self.position[1])
-                case "y":
-                    self.position = (self.position[0], new_val)
-                case other:
-                    setattr(self, f"_{other}", new_val)
+            setattr(self, attr, new_val)
 
     @property
     def game_position(self):
@@ -264,7 +278,16 @@ class GameView(arcade.View):
             cards = arcade.get_sprites_at_point(position, self.card_list)
 
         for card in cards:
-            card.turn_over()
+            card.animate(
+                "scale",
+                1.25,
+                duration=0.5,
+            ).then(card.turn_over).then(
+                "scale",
+                1,
+                duration=0.5,
+            )
+            # card.turn_over()
 
     def rescue(self, location_or_card):
         if isinstance(location_or_card, Card):
@@ -283,17 +306,14 @@ class GameView(arcade.View):
             source_position = position_from_location(source_location_or_card)
             source_cards = arcade.get_sprites_at_point(source_position, self.card_list)
 
-        target_position = position_from_location(target_location)
+        target_x, target_y = target_position = position_from_location(target_location)
         for card in arcade.get_sprites_at_point(target_position, self.card_list):
             if card not in source_cards:
                 card.kill()
 
         for card in source_cards:
-            card.ease_position(
-                target_position,
-                easefn=arcade.ease_out,
-                time=0.2,
-            )
+            card.animate("center_x", target_x, duration=0.2, ease="ease_out")
+            card.animate("center_y", target_y, duration=0.2, ease="ease_out")
 
     @property
     def accent_color(self):
@@ -512,7 +532,9 @@ class GameView(arcade.View):
             except InvalidMove as e:
                 print(e.args[0])
                 self.camera_game.shake(Vec2(10, 0), speed=5)
-                self.held_card.ease_position(self.held_card.game_position, time=0.2)
+                game_pos_x, game_pos_y = self.held_card.game_position
+                self.held_card.animate("center_x", game_pos_x, duration=0.2)
+                self.held_card.animate("center_y", game_pos_y, duration=0.2)
             finally:
                 if self.held_card:
                     self.card_list.append(self.held_card)
