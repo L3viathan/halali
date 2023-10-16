@@ -144,8 +144,6 @@ class Card(arcade.Sprite):
 
     def animate_now(self, _dt, attribute, final_value, duration, ease="linear"):
         # start easing, also schedule a simple setter at the end?
-        # TODO: also support callables as "attribute", in which case we just
-        # call that callable and do nothing else.
         if isinstance(attribute, str):
             if not final_value or not duration:
                 raise ValueError("animate() missing final_value or duration")
@@ -158,6 +156,10 @@ class Card(arcade.Sprite):
                 ease_function=getattr(arcade, ease),
             )
             self._easings.append((attribute, easing))
+        elif attribute is None:
+            # this is such that you can do stuff like:
+            # card.animate(...).then(target_card and target_card.kill)
+            pass
         else:
             attribute()
 
@@ -179,10 +181,12 @@ class Card(arcade.Sprite):
     def hold(self):
         # sometimes non-integer positions can happen, probably when the update
         # fires concurrently with the mouse_move event. Therefore: rounding.
+        self.animate("scale", 1.1, duration=0.1)
         self.orig_position = round_position(self.position)
         self.being_held = True
 
     def release(self):
+        self.animate("scale", 1, duration=0.1)
         self.being_held = False
         self.orig_position = None
 
@@ -281,13 +285,12 @@ class GameView(arcade.View):
             card.animate(
                 "scale",
                 1.25,
-                duration=0.5,
+                duration=0.1,
             ).then(card.turn_over).then(
                 "scale",
                 1,
-                duration=0.5,
+                duration=0.1,
             )
-            # card.turn_over()
 
     def rescue(self, location_or_card):
         if isinstance(location_or_card, Card):
@@ -309,11 +312,17 @@ class GameView(arcade.View):
         target_x, target_y = target_position = position_from_location(target_location)
         for card in arcade.get_sprites_at_point(target_position, self.card_list):
             if card not in source_cards:
-                card.kill()
+                target_card = card
+                break
+        else:
+            target_card = None
 
         for card in source_cards:
+            # pull to top
+            self.card_list.remove(card)
+            self.card_list.append(card)
             card.animate("center_x", target_x, duration=0.2, ease="ease_out")
-            card.animate("center_y", target_y, duration=0.2, ease="ease_out")
+            card.animate("center_y", target_y, duration=0.2, ease="ease_out").then(target_card and target_card.kill)
 
     @property
     def accent_color(self):
@@ -484,6 +493,7 @@ class GameView(arcade.View):
             self.held_card = cards[-1]
             self.held_card.hold()
             self.card_list.remove(self.held_card)
+            self.card_list.append(self.held_card)
             if self.settings["indicators"]:
                 for x, y in self.game.available_moves(
                     location_from_position(card.position),
@@ -537,7 +547,6 @@ class GameView(arcade.View):
                 self.held_card.animate("center_y", game_pos_y, duration=0.2)
             finally:
                 if self.held_card:
-                    self.card_list.append(self.held_card)
                     self.held_card.release()
                     self.held_card = None
                 self.indicator_list.clear()
