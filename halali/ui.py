@@ -250,8 +250,9 @@ class GameView(arcade.View):
 
         if self.settings["music"]:
             self.bgmusic = arcade.play_sound(
-                arcade.load_sound(path("resources/nature-walk-124997.wav")),
+                arcade.load_sound(path("resources/...")),  # FIXME
                 looping=True,
+                volume=0.3,
             )
         else:
             self.bgmusic = None
