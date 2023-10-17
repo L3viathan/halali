@@ -1,5 +1,7 @@
 import sys
 import os
+import random
+from glob import glob
 from itertools import count
 from functools import partial
 
@@ -58,6 +60,23 @@ BOTTOM_Y = MAT_HEIGHT / 2 + MAT_HEIGHT * VERTICAL_MARGIN_PERCENT
 # The X of where to start putting things on the left side
 START_X = MAT_WIDTH / 2 + MAT_WIDTH * HORIZONTAL_MARGIN_PERCENT
 
+SOUNDS = [
+    "duck",
+    "shoot",
+    "chomp",
+    "chop",
+    "human",
+    "fox",
+    "bear",
+    "card",
+    "pickup",
+    "snap",
+    "no",
+    "rescuefox",
+    "rescuebear",
+    "rescuehuman",
+]
+
 
 def round_position(position):
     x, y = position
@@ -107,7 +126,7 @@ class Card(arcade.Sprite):
         self._easings = []
 
         # Image to use for the sprite when face down
-        self.image_file_name = path("resources/hidden.png")
+        self.image_file_name = path("resources/tiles/hidden.png")
 
         super().__init__(
             self.image_file_name,
@@ -119,7 +138,7 @@ class Card(arcade.Sprite):
         else:
             texture = card_info["kind"]
         # drop texture variation in kinds
-        self.append_texture(arcade.load_texture(path(f"resources/{texture}.png")))
+        self.append_texture(arcade.load_texture(path(f"resources/tiles/{texture}.png")))
         self.kind = card_info["kind"]
         self.being_held = False
         self.orig_position = None
@@ -207,6 +226,10 @@ class GameView(arcade.View):
         self.debug_info = {
             "mode": mode,
         }
+        self.sounds = {
+            sound: [arcade.load_sound(soundfile) for soundfile in glob(path(f"resources/sounds/{sound}*.wav"))]
+            for sound in SOUNDS
+        }
         match mode:
             case "hotseat":
                 self.game = Halali()
@@ -273,7 +296,18 @@ class GameView(arcade.View):
             color=COLOR_TEXT,
         )
 
+    def play_sound(self, sound, after=0):
+        if after:
+            pyglet.clock.schedule_once(
+                lambda _dt, *args, **kwargs: arcade.play_sound(*args, **kwargs),
+                after,
+                random.choice(self.sounds[sound]),
+            )
+        else:
+            arcade.play_sound(random.choice(self.sounds[sound]))
+
     def reveal(self, location_or_card):
+        self.play_sound("card")
         if isinstance(location_or_card, Card):
             cards = [location_or_card]
         else:
@@ -299,6 +333,13 @@ class GameView(arcade.View):
             cards = arcade.get_sprites_at_point(position, self.card_list)
 
         for card in cards:
+            match card:
+                case Card(kind="hunter") | Card(kind="lumberjack"):
+                    self.play_sound("rescuehuman")
+                case Card(kind="fox"):
+                    self.play_sound("rescuefox")
+                case Card(kind="bear"):
+                    self.play_sound("rescuebear")
             card.kill()
 
     def move(self, source_location_or_card, target_location):
@@ -322,6 +363,26 @@ class GameView(arcade.View):
             self.card_list.append(card)
             card.animate("center_x", target_x, duration=0.2, ease="ease_out")
             card.animate("center_y", target_y, duration=0.2, ease="ease_out").then(target_card and target_card.kill)
+            if target_card:
+                match target_card:
+                    case Card(kind="duck") | Card(kind="pheasant"):
+                        self.play_sound("duck", after=0.3)
+                    case Card(kind="hunter") | Card(kind="lumberjack"):
+                        self.play_sound("human", after=0.3)
+                    case Card(kind="fox"):
+                        self.play_sound("fox", after=0.3)
+                    case Card(kind="bear"):
+                        self.play_sound("bear", after=0.3)
+                match card:
+                    case Card(kind="hunter"):
+                        self.play_sound("shoot")
+                    case Card(kind="lumberjack"):
+                        self.play_sound("chop")
+                    case Card(kind="fox") | Card(kind="bear"):
+                        self.play_sound("chomp")
+            else:
+                self.play_sound("snap", after=0.1)
+
 
     @property
     def accent_color(self):
@@ -372,7 +433,7 @@ class GameView(arcade.View):
             ),
         ]:
             exit = arcade.Sprite(
-                path("resources/center.png"),
+                path("resources/tiles/center.png"),
             )
             exit.is_exit = True
             exit.position = pos
@@ -504,6 +565,7 @@ class GameView(arcade.View):
                     )
                     indicator.position = position_from_location((x, y))
                     self.indicator_list.append(indicator)
+            self.play_sound("pickup")
 
     def on_mouse_motion(self, x, y, dx, dy):
         if self.debug:
@@ -541,6 +603,7 @@ class GameView(arcade.View):
             except InvalidMove as e:
                 print(e.args[0])
                 self.camera_game.shake(Vec2(10, 0), speed=5)
+                self.play_sound("no")
                 game_pos_x, game_pos_y = self.held_card.game_position
                 self.held_card.animate("center_x", game_pos_x, duration=0.2)
                 self.held_card.animate("center_y", game_pos_y, duration=0.2)
