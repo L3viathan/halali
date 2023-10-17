@@ -148,7 +148,6 @@ class Card(arcade.Sprite):
             if not final_value or not duration:
                 raise ValueError("animate() missing final_value or duration")
             start_value = getattr(self, attribute)
-            print("starting animation of", attribute, "from", start_value, "to", final_value)
             easing = arcade.ease_value(
                 start_value,
                 final_value,
@@ -212,7 +211,7 @@ class GameView(arcade.View):
             case "hotseat":
                 self.game = Halali()
             case "singleplayer":
-                self.game = SPHalali()
+                self.game = SPHalali(view=self)
             case "host":
                 self.game = MPServerHalali()
             case "join":

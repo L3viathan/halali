@@ -5,12 +5,14 @@ from time import monotonic
 from itertools import product, groupby
 
 import arcade
+import pyglet
 
 from .networking import server, client
 from . import __version__
 
 N_ROWS_AND_COLS = 7
 TEAMS = ["humans", "animals"]
+COMPUTER_DELAY = 0.7
 
 CARD_TYPES = {
     "fox": {
@@ -332,68 +334,71 @@ class NetworkedHalali(Halali):
 
 
 class SPHalali(Halali):
-    def __init__(self):
+    def __init__(self, view):
         super().__init__()
+        self.view = view
         self.team = random.choice(["animals", "humans"])
 
-    def update(self, view):
-        super().update(view)
-        # if it's not our turn, try to make a move
+    def _swap_teams(self):
+        super()._swap_teams()
         if not self.can_play:
-            possible_moves = []
-            for source in product(range(N_ROWS_AND_COLS), repeat=2):
-                source_x, source_y = source
-                card = self.cards[source_x][source_y]
-                if not card:
-                    continue
-                if card["facing"] == "down":
-                    possible_moves.append(("reveal", source, 0))
-                elif card["kind"] not in MOVABLE_FOR[
-                    {"animals": "humans", "humans": "animals"}[self.team]
-                ]:
-                    continue
-                else:
-                    for target in self.available_moves(source, for_enemy=True):
-                        target_x, target_y = target
-                        target_card = self.cards[target_x][target_y]
-                        if target_card:
-                            possible_moves.append(("move", source, target, 2))
-                        else:
-                            possible_moves.append(("move", source, target, 1))
-                    if self.turns_left is not None:
-                        try:
-                            self.validate_rescue(source_x, source_y, for_enemy=True)
-                            possible_moves.append(("rescue", source, 3))
-                        except InvalidMove:
-                            pass
-            if possible_moves:
-                possible_moves.sort(key=lambda m: -m[-1])
-                good_moves = list(next(groupby(possible_moves, lambda x: x[-1]))[1])
-                random.shuffle(good_moves)
-                move = good_moves[0]
-                match move:
-                    case ["move", source, target, *_]:
-                        try:
-                            self.attempt_move(source, target, for_enemy=True)
-                            view.move(source, target)
-                        except InvalidMove as e:
-                            print(f"Rejecting {target} to {target} because {e.args[0]}")
-                    case ["reveal", source, *_]:
-                        try:
-                            self.attempt_reveal(source, for_enemy=True)
-                            view.reveal(source)
-                        except InvalidMove as e:
-                            print(f"Rejecting {source} because {e.args[0]}")
-                    case ["rescue", source, *_]:
-                        try:
-                            self.attempt_rescue(source, for_enemy=True)
-                            view.rescue(source)
-                        except InvalidMove as e:
-                            print(f"Rejecting {source} because {e.args[0]}")
-                    case other:
-                        print("Wat", other)
+            pyglet.clock.schedule_once(self.move_for_opponent, COMPUTER_DELAY)
+
+    def move_for_opponent(self, _dt):
+        possible_moves = []
+        for source in product(range(N_ROWS_AND_COLS), repeat=2):
+            source_x, source_y = source
+            card = self.cards[source_x][source_y]
+            if not card:
+                continue
+            if card["facing"] == "down":
+                possible_moves.append(("reveal", source, 0))
+            elif card["kind"] not in MOVABLE_FOR[
+                {"animals": "humans", "humans": "animals"}[self.team]
+            ]:
+                continue
             else:
-                print("Can't find move")
+                for target in self.available_moves(source, for_enemy=True):
+                    target_x, target_y = target
+                    target_card = self.cards[target_x][target_y]
+                    if target_card:
+                        possible_moves.append(("move", source, target, 2))
+                    else:
+                        possible_moves.append(("move", source, target, 1))
+                if self.turns_left is not None:
+                    try:
+                        self.validate_rescue(source_x, source_y, for_enemy=True)
+                        possible_moves.append(("rescue", source, 3))
+                    except InvalidMove:
+                        pass
+        if possible_moves:
+            possible_moves.sort(key=lambda m: -m[-1])
+            good_moves = list(next(groupby(possible_moves, lambda x: x[-1]))[1])
+            random.shuffle(good_moves)
+            move = good_moves[0]
+            match move:
+                case ["move", source, target, *_]:
+                    try:
+                        self.attempt_move(source, target, for_enemy=True)
+                        self.view.move(source, target)
+                    except InvalidMove as e:
+                        print(f"Rejecting {target} to {target} because {e.args[0]}")
+                case ["reveal", source, *_]:
+                    try:
+                        self.attempt_reveal(source, for_enemy=True)
+                        self.view.reveal(source)
+                    except InvalidMove as e:
+                        print(f"Rejecting {source} because {e.args[0]}")
+                case ["rescue", source, *_]:
+                    try:
+                        self.attempt_rescue(source, for_enemy=True)
+                        self.view.rescue(source)
+                    except InvalidMove as e:
+                        print(f"Rejecting {source} because {e.args[0]}")
+                case other:
+                    print("Wat", other)
+        else:
+            print("Can't find move")
 
 
 class MPServerHalali(NetworkedHalali):
