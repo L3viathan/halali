@@ -338,6 +338,8 @@ class SPHalali(Halali):
         super().__init__()
         self.view = view
         self.team = random.choice(["animals", "humans"])
+        if not self.can_play:
+            pyglet.clock.schedule_once(self.move_for_opponent, COMPUTER_DELAY)
 
     def _swap_teams(self):
         super()._swap_teams()
