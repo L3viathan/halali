@@ -148,6 +148,12 @@ class Card(arcade.Sprite):
     def __repr__(self):
         return f"<{self.kind} O:{self.orig_position} F:{self.facing}>"
 
+    @property
+    def pan(self):
+        # a value between -1 and 1, for playing sounds in stereo
+        percentage = self.center_x / SCREEN_WIDTH
+        return 2 * percentage - 1
+
     def animate(self, attribute, final_value=None, duration=0, delay=0, _delay=0, ease="linear"):
         # returns a partial of itself, with a delay set equal to the delay + duration
         delay = delay + _delay
@@ -296,18 +302,18 @@ class GameView(arcade.View):
             color=COLOR_TEXT,
         )
 
-    def play_sound(self, sound, after=0):
+    def play_sound(self, sound, after=0, pan=0):
         if after:
             pyglet.clock.schedule_once(
                 lambda _dt, *args, **kwargs: arcade.play_sound(*args, **kwargs),
                 after,
                 random.choice(self.sounds[sound]),
+                pan=pan
             )
         else:
-            arcade.play_sound(random.choice(self.sounds[sound]))
+            arcade.play_sound(random.choice(self.sounds[sound]), pan=pan)
 
     def reveal(self, location_or_card):
-        self.play_sound("card")
         if isinstance(location_or_card, Card):
             cards = [location_or_card]
         else:
@@ -315,6 +321,7 @@ class GameView(arcade.View):
             cards = arcade.get_sprites_at_point(position, self.card_list)
 
         for card in cards:
+            self.play_sound("card", pan=card.pan)
             card.animate(
                 "scale",
                 1.25,
@@ -335,11 +342,11 @@ class GameView(arcade.View):
         for card in cards:
             match card:
                 case Card(kind="hunter") | Card(kind="lumberjack"):
-                    self.play_sound("rescuehuman")
+                    self.play_sound("rescuehuman", pan=card.pan)
                 case Card(kind="fox"):
-                    self.play_sound("rescuefox")
+                    self.play_sound("rescuefox", pan=card.pan)
                 case Card(kind="bear"):
-                    self.play_sound("rescuebear")
+                    self.play_sound("rescuebear", pan=card.pan)
             card.kill()
 
     def move(self, source_location_or_card, target_location):
@@ -366,22 +373,22 @@ class GameView(arcade.View):
             if target_card:
                 match target_card:
                     case Card(kind="duck") | Card(kind="pheasant"):
-                        self.play_sound("duck", after=0.3)
+                        self.play_sound("duck", after=0.3, pan=target_card.pan)
                     case Card(kind="hunter") | Card(kind="lumberjack"):
-                        self.play_sound("human", after=0.3)
+                        self.play_sound("human", after=0.3, pan=target_card.pan)
                     case Card(kind="fox"):
-                        self.play_sound("fox", after=0.3)
+                        self.play_sound("fox", after=0.3, pan=target_card.pan)
                     case Card(kind="bear"):
-                        self.play_sound("bear", after=0.3)
+                        self.play_sound("bear", after=0.3, pan=target_card.pan)
                 match card:
                     case Card(kind="hunter"):
-                        self.play_sound("shoot")
+                        self.play_sound("shoot", pan=card.pan)
                     case Card(kind="lumberjack"):
-                        self.play_sound("chop")
+                        self.play_sound("chop", pan=card.pan)
                     case Card(kind="fox") | Card(kind="bear"):
-                        self.play_sound("chomp")
+                        self.play_sound("chomp", pan=card.pan)
             else:
-                self.play_sound("snap", after=0.1)
+                self.play_sound("snap", after=0.1, pan=card.pan)
 
 
     @property
