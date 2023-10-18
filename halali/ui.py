@@ -10,6 +10,7 @@ import arcade.gui
 import pyglet
 from pyglet.math import Vec2
 
+from . import __version__
 from .game import (
     Halali,
     SPHalali,
@@ -724,6 +725,15 @@ class SetupView(arcade.View):
                 ],
             },
         ]
+        self.version_text = arcade.Text(
+            __version__,
+            start_x=TEXT_MARGIN,
+            start_y=TEXT_MARGIN,
+            anchor_x="center",
+            anchor_y="center",
+            font_size=10,
+            color=COLOR_TEXT,
+        )
 
         self._stack = []
         self.show_menu()
@@ -788,4 +798,5 @@ class SetupView(arcade.View):
             SCREEN_WIDTH,
             SCREEN_HEIGHT * 0.75,
         )
+        self.version_text.draw()
         self.manager.draw()
