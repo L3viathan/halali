@@ -243,7 +243,7 @@ class GameView(arcade.View):
                 self.game = Halali()
             case "singleplayer":
                 self.game = SPHalali(view=self)
-            case "lan":  # TODO: rename to "lan" and do UI work
+            case "lan":
                 if server := find_server():
                     self.game = MPClientHalali(server=server)
                 else:
@@ -307,6 +307,8 @@ class GameView(arcade.View):
         )
 
     def play_sound(self, sound, after=0, pan=0):
+        if not self.settings["sound"]:
+            return
         if after:
             pyglet.clock.schedule_once(
                 lambda _dt, *args, **kwargs: arcade.play_sound(*args, **kwargs),
