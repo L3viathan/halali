@@ -401,6 +401,7 @@ class SPHalali(Halali):
                     print("Wat", other)
         else:
             print("Can't find move")
+            self._swap_teams()
 
 
 class MPServerHalali(NetworkedHalali):
