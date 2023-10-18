@@ -477,12 +477,13 @@ class MPServerHalali(NetworkedHalali):
 
 
 class MPClientHalali(NetworkedHalali):
-    def __init__(self):
+    def __init__(self, server):
         super().__init__(deal=False)
         self.send_queue, self.recv_queue = queue.Queue(), queue.Queue()
         Thread(target=client, kwargs={
             "send": self.send_queue,
             "recv": self.recv_queue,
+            "server": server,
         }).start()
         self.send_queue.put(["status"])
         self.send_queue.put(["cards"])

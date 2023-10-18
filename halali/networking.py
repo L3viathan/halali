@@ -40,10 +40,10 @@ def server(send, recv):
         s.close()
 
 
-def client(send, recv):
+def client(send, recv, server):
     conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     print("Connecting...")
-    conn.connect(find_server())
+    conn.connect(server)
     print("Connected!")
     while True:
         try:

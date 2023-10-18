@@ -21,6 +21,7 @@ from .game import (
     GameOver,
     N_ROWS_AND_COLS,
 )
+from .networking import find_server
 from .settings import Settings
 
 SCREEN_MARGIN = 100
@@ -242,10 +243,11 @@ class GameView(arcade.View):
                 self.game = Halali()
             case "singleplayer":
                 self.game = SPHalali(view=self)
-            case "host":
-                self.game = MPServerHalali()
-            case "join":
-                self.game = MPClientHalali()
+            case "lan":  # TODO: rename to "lan" and do UI work
+                if server := find_server():
+                    self.game = MPClientHalali(server=server)
+                else:
+                    self.game = MPServerHalali()
             case other:
                 raise RuntimeError(f"Unknown game mode {other}")
 
@@ -714,8 +716,7 @@ class SetupView(arcade.View):
             {"label": "Play", "play": "singleplayer"},
             {"label": "Multiplayer", "menu": [
                     {"label": "Hot-Seat", "play": "hotseat"},
-                    {"label": "Host", "play": "host"},
-                    {"label": "Join", "play": "join"},
+                    {"label": "LAN", "play": "lan"},
                 ],
             },
             {"label": "Settings", "menu": [
