@@ -81,11 +81,16 @@ SOUNDS = [
 
 
 def round_position(position):
+    # round to nearest possible position. We round the position to the nearest
+    # CARD_SIZE, but with an offset of half a CARD_SIZE (because the position
+    # is in the center of the tile)
     x, y = position
-    nearest = CARD_SIZE // 2
+    x -= CARD_SIZE // 2
+    y -= CARD_SIZE // 2
+    nearest = CARD_SIZE
     return (
-        nearest * round(x / nearest),
-        nearest * round(y / nearest),
+        nearest * round(x / nearest) + CARD_SIZE // 2,
+        nearest * round(y / nearest) + CARD_SIZE // 2,
     )
 
 def path(relative_path):
@@ -557,7 +562,7 @@ class GameView(arcade.View):
         cards = arcade.get_sprites_at_point((x, y), self.card_list)
         if cards:
             card = cards[-1]
-            loc = location_from_position(card.position)
+            loc = location_from_position(round_position(card.position))
             if card.facing == "down" and self.game.attempt_reveal(loc):
                 self.reveal(card)
                 return
@@ -568,9 +573,7 @@ class GameView(arcade.View):
             self.card_list.remove(self.held_card)
             self.card_list.append(self.held_card)
             if self.settings["indicators"]:
-                for x, y in self.game.available_moves(
-                    location_from_position(card.position),
-                ):
+                for x, y in self.game.available_moves(loc):
                     indicator = arcade.SpriteSolidColor(
                         CARD_SIZE // 8,
                         CARD_SIZE // 8,
