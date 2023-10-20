@@ -742,7 +742,12 @@ class SetupView(arcade.View):
         )
 
         self._stack = []
+        self.next_view = None
+        self._showed_loading_message = False
         self.show_menu()
+
+    def load_view(self, view, *args, message, **kwargs):
+        self.next_view = (view, args, kwargs, message)
 
     def show_menu(self):
         self.manager.clear()
@@ -770,8 +775,12 @@ class SetupView(arcade.View):
                     def on_click(event, mode=mode):
                         self._stack = []
                         self.manager.disable()
-                        game_view = GameView(mode, self.settings.dump())
-                        self.window.show_view(game_view)
+                        self.load_view(
+                            GameView,
+                            mode,
+                            self.settings.dump(),
+                            message="Attempting to find server...",
+                        )
                 case {"menu": _}:
                     def on_click(event, i=i):  # noqa
                         self._stack.append(i)
@@ -798,11 +807,27 @@ class SetupView(arcade.View):
 
     def on_draw(self):
         self.clear()
-        self.texture.draw_sized(
-            SCREEN_WIDTH / 2,
-            SCREEN_HEIGHT / 2,
-            SCREEN_WIDTH,
-            SCREEN_HEIGHT * 0.75,
-        )
-        self.version_text.draw()
-        self.manager.draw()
+        if self.next_view:
+            arcade.set_background_color(arcade.color.AMAZON)
+            arcade.draw_text(
+                self.next_view[-1],
+                TEXT_MARGIN,
+                TEXT_MARGIN,
+                COLOR_TEXT,
+                36,
+            )
+            self._showed_loading_message = True
+        else:
+            self.texture.draw_sized(
+                SCREEN_WIDTH / 2,
+                SCREEN_HEIGHT / 2,
+                SCREEN_WIDTH,
+                SCREEN_HEIGHT * 0.75,
+            )
+            self.version_text.draw()
+            self.manager.draw()
+
+    def update(self, _delta_time):
+        if self._showed_loading_message:
+            view_cls, args, kwargs, _ = self.next_view
+            self.window.show_view(view_cls(*args, **kwargs))
