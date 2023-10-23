@@ -46,22 +46,6 @@ SCREEN_WIDTH = N_ROWS_AND_COLS * CARD_SIZE + 2 * SCREEN_MARGIN
 SCREEN_HEIGHT = N_ROWS_AND_COLS * CARD_SIZE + 2 * SCREEN_MARGIN
 BORDER_WIDTH = 15
 
-# How big is the mat we'll place the card on?
-MAT_PERCENT_OVERSIZE = 1.25
-MAT_HEIGHT = int(CARD_SIZE * MAT_PERCENT_OVERSIZE)
-MAT_WIDTH = int(CARD_SIZE * MAT_PERCENT_OVERSIZE)
-
-# How much space do we leave as a gap between the mats?
-# Done as a percent of the mat size.
-VERTICAL_MARGIN_PERCENT = 0.10
-HORIZONTAL_MARGIN_PERCENT = 0.10
-
-# The Y of the bottom row (2 piles)
-BOTTOM_Y = MAT_HEIGHT / 2 + MAT_HEIGHT * VERTICAL_MARGIN_PERCENT
-
-# The X of where to start putting things on the left side
-START_X = MAT_WIDTH / 2 + MAT_WIDTH * HORIZONTAL_MARGIN_PERCENT
-
 SOUNDS = [
     "duck",
     "shoot",
@@ -144,7 +128,6 @@ class Card(arcade.Sprite):
             texture = f"{card_info['kind']}_{card_info['variant']}"
         else:
             texture = card_info["kind"]
-        # drop texture variation in kinds
         self.append_texture(arcade.load_texture(path(f"resources/tiles/{texture}.png")))
         self.kind = card_info["kind"]
         self.being_held = False
