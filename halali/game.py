@@ -341,6 +341,10 @@ class SPHalali(Halali):
         if not self.can_play:
             pyglet.clock.schedule_once(self.move_for_opponent, COMPUTER_DELAY)
 
+    @property
+    def other_team(self):
+        return {"animals": "humans", "humans": "animals"}[self.team]
+
     def _swap_teams(self):
         super()._swap_teams()
         if not self.can_play:
@@ -355,9 +359,7 @@ class SPHalali(Halali):
                 continue
             if card["facing"] == "down":
                 possible_moves.append(("reveal", source, 0))
-            elif card["kind"] not in MOVABLE_FOR[
-                {"animals": "humans", "humans": "animals"}[self.team]
-            ]:
+            elif card["kind"] not in MOVABLE_FOR[self.other_team]:
                 continue
             else:
                 for target in self.available_moves(source, for_enemy=True):
@@ -365,8 +367,10 @@ class SPHalali(Halali):
                     target_card = self.cards[target_x][target_y]
                     if target_card:
                         possible_moves.append(("move", source, target, 2))
-                    else:
+                    elif card.get("team") == self.other_team:
                         possible_moves.append(("move", source, target, 1))
+                    else:
+                        possible_moves.append(("move", source, target, 0))
                 if self.turns_left is not None:
                     try:
                         self.validate_rescue(source_x, source_y, for_enemy=True)
