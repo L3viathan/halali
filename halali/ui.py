@@ -19,6 +19,7 @@ from .game import (
     MOVABLE_FOR,
     InvalidMove,
     GameOver,
+    Disconnected,
     N_ROWS_AND_COLS,
 )
 from .networking import find_server
@@ -626,6 +627,10 @@ class GameView(arcade.View):
                     arcade.stop_sound(self.bgmusic)
                 game_over_view = GameOverView(self.game.points)
                 self.window.show_view(game_over_view)
+            except Disconnected:
+                if self.bgmusic:
+                    arcade.stop_sound(self.bgmusic)
+                self.window.show_view(SetupView())
 
 
 class GameOverView(arcade.View):

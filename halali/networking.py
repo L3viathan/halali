@@ -55,6 +55,7 @@ def client(send, recv, server):
         conn.sendall(json.dumps(msg, separators=",:").encode())
         data = conn.recv(8192)
         if not data:
+            recv.put(["disconnected"])
             return
         print("Received:", data)
         recv.put(json.loads(data))

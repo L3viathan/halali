@@ -74,6 +74,10 @@ class InvalidMove(Exception):
     pass
 
 
+class Disconnected(Exception):
+    pass
+
+
 class GameOver(Exception):
     pass
 
@@ -427,7 +431,6 @@ class MPServerHalali(NetworkedHalali):
             message = self.recv_queue.get(block=False, timeout=0)
         except queue.Empty:
             return
-        print("Qstat:", self.send_queue.qsize(), self.recv_queue.qsize())
         print("Got message:", message)
         match message:
             case ["status"]:
@@ -511,7 +514,6 @@ class MPClientHalali(NetworkedHalali):
             message = self.recv_queue.get(block=block)
         except queue.Empty:
             return
-        print("Qstat:", self.send_queue.qsize(), self.recv_queue.qsize())
         match message:
             case ["status", status]:
                 if __version__ != status["version"]:
